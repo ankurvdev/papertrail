@@ -6,9 +6,4 @@
 	} from './store';
 
 </script>
-
-<input bind:value={newsrctoadd} /><IconButton
-	class="material-icons"
-	on:click={() => source_add(newsrctoadd)}
-	touch>search</IconButton
->
+<div></div>
