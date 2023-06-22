@@ -3,11 +3,52 @@ import hashlib
 import json
 import os
 import sqlite3
-from pathlib import Path
 import sys
+from pathlib import Path
 
+import typesense
+import typesense.client
+import typesense.exceptions
 from doctr.io import DocumentFile
 from doctr.models import ocr_predictor
+
+curr_dir = Path(__file__).absolute().parent
+sys.path.insert(1, curr_dir.parent.as_posix())
+
+
+class TypesenseBridgeException(Exception):
+    pass
+
+
+client = typesense.Client({
+    'api_key': 'test',
+    'nodes': [{
+        'host': 'localhost',
+        'port': '8108',
+        'protocol': 'http'
+    }],
+    'connection_timeout_seconds': 2
+})
+
+# Drop pre-existing collection if any
+try:
+    client.collections['documents'].delete()
+except typesense.exceptions.TypesenseClientError:
+    pass
+
+# Create a collection
+
+create_response = client.collections.create({
+    "name": "documents",
+    "fields": [
+        {"name": "filename", "type": "string"},
+        {"name": "url", "type": "string"},
+        {"name": "tags", "type": "string[]", "facet": True},
+        {"name": "created_at", "type": "int32", "facet": True},
+        {"name": "contents", "type": "string"}
+    ],
+    "default_sorting_field": "created_at"
+})
 
 model = ocr_predictor(pretrained=True)
 
@@ -100,6 +141,23 @@ class ScanForDuplicates:
             # Analyze
             if doc:
                 ocr_data.write_text(json.dumps(model(doc).export()))
+        if ocr_data.exists():
+            json_doc = json.loads(ocr_data.read_text())
+            words = []
+            for page in json_doc["pages"]:
+                for block in page["blocks"]:
+                    for line in block["lines"]:
+                        for word in line["words"]:
+                            words.append(word["value"])
+            contents = " ".join(words)
+            typesense_dict = {
+                'filename': fpath.name,
+                'url': fpath.as_posix(),
+                'tags': [],
+                'created_at': 0,
+                'contents': contents
+            }
+            client.collections['documents'].documents.create(typesense_dict)
 
         return md5sum
 
