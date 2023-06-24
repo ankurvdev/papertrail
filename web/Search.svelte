@@ -28,8 +28,8 @@
 </section>
 
 <main id="search-results">
-	{#if searchTerm && searchResults.length === 0}
-		<!--<NoResults />	-->
+	{#if !searchTerm || searchResults.length === 0}
+		<div> No Results </div>
 	{:else}
 		{#each searchResults as searchResultItem}
 			<SearchResultItem {searchResultItem} />
@@ -75,5 +75,11 @@
 		border-radius: 5px;
 		padding: 8px;
 		margin: 0 10px 0;
+	}
+	#search-results {
+		display: grid;
+		grid-auto-flow: row;
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+		grid-template-rows: repeat(auto-fit, minmax(260px, 1fr));
 	}
 </style>
