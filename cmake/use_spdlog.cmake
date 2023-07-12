@@ -1,0 +1,5 @@
+function(link_to_target targetName)
+    vcpkg_download(spdlog)
+    find_package(spdlog REQUIRED)
+    target_link_libraries(${targetName} PRIVATE spdlog::spdlog spdlog::spdlog_header_only)
+endfunction()

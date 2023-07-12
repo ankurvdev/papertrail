@@ -1,0 +1,5 @@
+function(link_to_target targetName)
+    vcpkg_download(imgui)
+    find_package(imgui CONFIG REQUIRED)
+    target_link_libraries(${targetName} PRIVATE imgui::imgui)
+endfunction()

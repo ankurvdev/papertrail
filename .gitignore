@@ -1,5 +1,3 @@
-Solutions/*
+__pycache__
 .config
-.vs
-out
-CMakeSettings.json
+.vscode

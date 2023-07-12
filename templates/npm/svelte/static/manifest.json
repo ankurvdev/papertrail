@@ -1,0 +1,18 @@
+{
+    "short_name": "zzzsSvelte.Namezzze-pwa",
+    "name": "zzzsSvelte.Namezzze-pwa",
+    "start_url": "/index.html",
+    "background_color": "#FFFFFF",
+    "display": "standalone",
+    "scope": "/",
+    "theme_color": "#3367D6",
+    "icons": [
+        {
+            "src": "ic_launcher.png",
+            "type": "image/png",
+            "sizes": "144x144"
+        }
+    ],
+    "lang": "en-US",
+    "description": "Something"
+}

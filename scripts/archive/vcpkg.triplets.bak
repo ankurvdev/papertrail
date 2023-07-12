@@ -1,0 +1,37 @@
+From a2fb74434b4fd3d74f72dcd830b8b1a7a2743c14 Mon Sep 17 00:00:00 2001
+From: "Ankur Verma (SF)" <ankurv@corp.microsoft.com>
+Date: Sat, 21 Mar 2020 05:49:47 -0700
+Subject: [PATCH] Added new triplets
+
+---
+ triplets/community/arm-windows-static-md.cmake   | 5 +++++
+ triplets/community/arm64-windows-static-md.cmake | 5 +++++
+ 2 files changed, 10 insertions(+)
+ create mode 100644 triplets/community/arm-windows-static-md.cmake
+ create mode 100644 triplets/community/arm64-windows-static-md.cmake
+
+diff --git a/triplets/community/arm-windows-static-md.cmake b/triplets/community/arm-windows-static-md.cmake
+new file mode 100644
+index 000000000..c371b46d5
+--- /dev/null
++++ b/triplets/community/arm-windows-static-md.cmake
+@@ -0,0 +1,5 @@
++set(VCPKG_TARGET_ARCHITECTURE arm)
++set(VCPKG_CRT_LINKAGE dynamic)
++set(VCPKG_LIBRARY_LINKAGE static)
++
++
+diff --git a/triplets/community/arm64-windows-static-md.cmake b/triplets/community/arm64-windows-static-md.cmake
+new file mode 100644
+index 000000000..1b37f6f04
+--- /dev/null
++++ b/triplets/community/arm64-windows-static-md.cmake
+@@ -0,0 +1,5 @@
++set(VCPKG_TARGET_ARCHITECTURE arm64)
++set(VCPKG_CRT_LINKAGE dynamic)
++set(VCPKG_LIBRARY_LINKAGE static)
++
++
+-- 
+2.17.1.windows.2
+
