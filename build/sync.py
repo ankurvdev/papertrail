@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 
-import git
+from . import git
 
 
 class SyncException(Exception):

@@ -1,7 +1,7 @@
 import pathlib
 import sys
 import subprocess
-import externaltools
+from . import externaltools
 
 
 def rasterize_svg(srcsvg: pathlib.Path, outdir: pathlib.Path, out_rel_path: pathlib.Path,

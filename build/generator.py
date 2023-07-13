@@ -4,8 +4,8 @@ import re
 import subprocess
 from typing import Any, Dict
 
-if True:
-    import rasterize
+
+from . import rasterize
 
 
 class Generator:

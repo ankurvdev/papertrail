@@ -1,17 +1,12 @@
 #!/usr/bin/python3
-import difflib
-import filecmp
 import hashlib
 import os
 import pathlib
-import shutil
-import subprocess
-import sys
 from typing import Optional
 
-import configenv
-import quick
-import sync
+from . import configenv
+from . import quick
+from . import sync
 
 
 class BuildEnv:

@@ -5,10 +5,10 @@ import os
 import pathlib
 import subprocess
 
-import buildenv
-import externaltools
-import generator
-import sync
+from . import buildenv
+from . import externaltools
+from . import generator
+from . import sync
 
 
 class SvelteBuilderException(Exception):

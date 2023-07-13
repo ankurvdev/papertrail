@@ -6,7 +6,7 @@ import sys
 import time
 from typing import Any, Optional
 
-import externaltools
+from . import externaltools
 
 
 class GitError(Exception):

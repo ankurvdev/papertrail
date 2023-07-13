@@ -7,8 +7,8 @@ import pathlib
 import sys
 from typing import Any, Dict, List, Set
 
-import buildenv
-import externaltools
+from . import buildenv
+from . import externaltools
 
 
 class Platform(enum.Enum):

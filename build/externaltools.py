@@ -123,7 +123,7 @@ def MoveUp(path: pathlib.Path):
 
 def GetBinPath():
     try:
-        import configenv  # pylint: ignore
+        from . import configenv  # pylint: ignore
         return pathlib.Path(configenv.ConfigEnv(None).GetConfigPath("DEVEL_BINPATH", make=True))
     except ImportError:
         return pathlib.Path().absolute()
