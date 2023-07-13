@@ -105,6 +105,14 @@ class ScanForDuplicates:
             c.execute('update fileinfo set lastmodified = ?, size = ?, md5hash = ? where path = ? ', (mtime, size, "", fpath.as_posix()))
         return found
 
+    # Dir
+    #   file0
+    #   page0_ocr_doctr.json
+    #   page1_thumbnail.jpg
+    #   page2_pdf2text.json
+    #   page3_ocr_tesseract.json
+    #   page4_tags.json
+    #   tags.json 
     def _analyze_file(self, fpath: Path, md5sum: str, status):
         sys.stderr.write(f"{status} Analyzing {fpath.as_posix()}\n")
         if len(md5sum) == 0:
@@ -177,7 +185,11 @@ parser = argparse.ArgumentParser(description='Scan Directories for duplicates')
 parser.add_argument('--work-dir', type=Path)
 parser.add_argument('dirs', type=Path, nargs='*')
 args = parser.parse_args()
-scanner = ScanForDuplicates(args.work_dir)
+
+svc = PaperTrailService(args.work_dir)
+svc.startweb()
 for sdir in args.dirs:
-    scanner.scan(Path(sdir))
-scanner.analyze_all()
+    svc.scan(Path(sdir))
+svc.analyze_all()
+
+svc.waitforstop()
