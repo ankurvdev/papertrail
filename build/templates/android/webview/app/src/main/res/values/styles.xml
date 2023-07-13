@@ -1,0 +1,19 @@
+<resources>
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.Design.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item> <!-- Make sure we can draw behind hte status bar-->
+        <item name="windowActionBar">false</item> <!-- No Action Bar-->
+        <item name="windowNoTitle">true</item> <!-- No Title -->
+        <item name="android:fitsSystemWindows">true</item> <!-- Make sure app layout extends behind the status bar-->
+        <item name="android:windowTranslucentNavigation">true</item> <!-- make the bottom nav bar translucent -->
+        <item name="android:windowTranslucentStatus">false</item> <!-- Because we're going to make top status bar transparent-->
+        <item name="android:statusBarColor">@android:color/transparent</item><!-- make the status bar transparent -->
+        <item name="android:windowLightStatusBar">true</item> <!-- Change status bar text to black -->
+
+    </style>
+</resources>

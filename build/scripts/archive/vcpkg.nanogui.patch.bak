@@ -1,0 +1,39 @@
+From a2dad368fb4c56fdf75ddcf61a2cf4772ee2cb90 Mon Sep 17 00:00:00 2001
+From: "Ankur Verma (SF)" <ankurv@corp.microsoft.com>
+Date: Sat, 21 Mar 2020 06:49:46 -0700
+Subject: [PATCH] Fix Nanogui
+
+---
+ ports/nanogui/portfile.cmake | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/ports/nanogui/portfile.cmake b/ports/nanogui/portfile.cmake
+index bc868e549..743107cc5 100644
+--- a/ports/nanogui/portfile.cmake
++++ b/ports/nanogui/portfile.cmake
+@@ -4,6 +4,12 @@ if(VCPKG_TARGET_IS_UWP)
+     message(FATAL_ERROR "nanogui doesn't support UWP.")
+ endif()
+ 
++if (VCPKG_LIBRARY_LINKAGE STREQUAL dynamic)
++    set(NANOGUI_BUILD_SHARED ON)
++else()
++    set(NANOGUI_BUILD_SHARED OFF)
++endif()
++
+ vcpkg_from_github(
+     OUT_SOURCE_PATH SOURCE_PATH
+     REPO wjakob/nanogui
+@@ -16,6 +22,9 @@ vcpkg_from_github(
+ 
+ vcpkg_configure_cmake(
+     SOURCE_PATH ${SOURCE_PATH}
++    OPTIONS
++        -DNANOGUI_BUILD_SHARED=${NANOGUI_BUILD_SHARED}
++        -DNANOGUI_BUILD_EXAMPLE=OFF
+ )
+ 
+ vcpkg_install_cmake()
+-- 
+2.17.1.windows.2
+

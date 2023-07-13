@@ -1,0 +1,3 @@
+Source: gattlib
+Version: 0.3
+Description: Library to access GATT information from BLE (Bluetooth Low Energy) devices http://labapart.com/
