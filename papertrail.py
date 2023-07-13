@@ -57,7 +57,7 @@ class OCRException(Exception):
     pass
 
 
-class ScanForDuplicates:
+class PaperTrailService:
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
         self.work_dir.mkdir(parents=True, exist_ok=True)
