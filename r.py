@@ -12,7 +12,6 @@ import os
 src_dir = Path(__file__).parent
 parser = argparse.ArgumentParser()
 parser.add_argument('--work-dir', type=Path, default=src_dir / 'work')
-parser.add_argument('--stages', type=str, default='all')
 args = parser.parse_args()
 
 work_dir: Path = args.work_dir
@@ -22,8 +21,6 @@ venv_dir = work_dir / 'venv'
 if not venv_dir.exists():
     subprocess.check_call([sys.executable, "-m", "venv", venv_dir.as_posix()])
     subprocess.check_call([(venv_dir / "bin" / "pip").as_posix(), "install", "-r", (src_dir / "requirements.txt").as_posix()])
-    if args.stages == 'venv':
-        sys.exit(0)
 
 typesense_bin = work_dir / 'typesense-server'
 if not typesense_bin.exists():
