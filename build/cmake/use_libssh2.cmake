@@ -1,0 +1,5 @@
+function(link_to_target targetName)
+    vcpkg_download(libssh2)
+    find_package(Libssh2 REQUIRED QUIET)
+    target_link_libraries(${target} PRIVATE Libssh2::libssh2)
+endfunction()

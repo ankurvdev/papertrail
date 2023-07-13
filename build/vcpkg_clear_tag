@@ -1,0 +1,2 @@
+#!/bin/bash
+for b in $(git branch -a | grep -oE '$1/ankurv/.*'); do git push origin --delete $b; done

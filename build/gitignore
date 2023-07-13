@@ -1,0 +1,22 @@
+# Visual Studio
+.vs
+CMakeSettings.json
+out
+
+# Visual Studio Code
+.vscode
+!.vscode/settings.json
+build/
+cmake-build/
+
+# JetBrains CLion
+cmake-build-*/
+.idea/
+**/out
+
+# Other local working directories
+ApolloSDK/
+wdir/
+venv/
+__pycache__
+**/*.log

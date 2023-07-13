@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+    id 'kotlin-android'
+}
+
+android {
+    compileSdk zzzsAndroidSDKVersionzzze
+    ndkVersion 'zzzsAndroidNDKVersionzzze'
+    ndkPath 'zzzsAndroidNDKPathzzze'
+
+    defaultConfig {
+        applicationId 'com.zzzsAndroid.AppPackageNamezzze'
+        minSdkVersion 27
+        targetSdkVersion 33
+        versionCode zzzsBuild.VersionCodezzze
+        versionName "zzzsBuild.VersionFullzzze"
+
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_shared', '-DCMAKE_MAKE_PROGRAM:PATH=zzzsNinjaBinzzze'
+            }
+        }
+        ndk {
+            // abiFilters 'x86_64' // Uncomment To build and test quickly
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            applicationIdSuffix ".test"
+            jniDebuggable true
+            debuggable true
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            version 'zzzsCMakeVersionzzze'
+            path 'src/main/cpp/CMakeLists.txt'
+        }
+    }
+
+    namespace 'com.zzzsAndroid.AppPackageNamezzze'
+
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.10.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.8.0'
+    implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
+    implementation 'com.google.android.gms:play-services-location:21.0.1'
+    implementation "com.android.billingclient:billing:5.2.0"
+}

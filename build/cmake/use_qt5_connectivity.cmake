@@ -1,0 +1,8 @@
+function(link_to_target targetName)
+    vcpkg_download(qt5-connectivity)
+    find_package(Qt5Bluetooth CONFIG REQUIRED)
+    target_link_libraries(${targetName} PUBLIC Qt::Bluetooth Qt5::Bluetooth Qt::BluetoothPrivate Qt5::BluetoothPrivate)
+    target_compile_options(${targetName} PUBLIC -fPIC)
+    #find_package(Qt5 COMPONENTS Connectivity REQUIRED)
+    #target_link_libraries(${target} PRIVATE Qt5::Connectivity)
+endfunction()
