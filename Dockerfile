@@ -1,9 +1,11 @@
 FROM fedora:latest as builder
-RUN dnf -y update && dnf -y install git cmake gcc g++ python python-devel nodejs-npm && dnf clean all
+RUN dnf -y update && dnf -y install git cmake gcc g++ python python-devel nodejs-npm libglvnd-glx && dnf clean all
 ADD . /s
 RUN python /s/r.py --work-dir /app
 RUN /app/venv/bin/python /s/papertrail.py --warm-up-doctr-cache=/app
+
 FROM fedora:latest
+RUN dnf -y update && dnf -y install python libglvnd-glx && dnf clean all
 WORKDIR /app
 VOLUME /data
 VOLUME /cache
