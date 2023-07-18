@@ -50,17 +50,6 @@
 		padding: 2% 0;
 	}
 
-	/* General Structure */
-	main#bookshelf {
-		width: 100%;
-		margin: 10px;
-		display: flex;
-		flex-direction: row;
-		flex-wrap: wrap;
-		align-items: flex-start;
-		justify-content: center;
-	}
-
 	#search-input-cont {
 		width: 40%;
 		display: flex;
@@ -80,6 +69,8 @@
 		display: grid;
 		grid-auto-flow: row;
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-		grid-template-rows: repeat(auto-fit, minmax(260px, 1fr));
+		/* grid-template-rows: repeat(auto-fit, minmax(260px, 1fr)); */
+		grid-auto-rows: minmax(260px, 1.3fr);
+
 	}
 </style>

@@ -23,7 +23,8 @@ export async function SearchTypesense(searchTerm: string): Promise<SearchResultI
         //'filter_by' : 'num_employees:>100',
         //'sort_by'   : 'num_employees:desc'
     }
-    let searchResults = (await fetch('/search?' +new URLSearchParams(searchParameters))).json();
+    const response = await fetch('/search?' + new URLSearchParams(searchParameters))
+    const searchResults = await response.json();
     let results: SearchResultItemType[] = []
     if (searchResults.hits && searchResults.hits.length > 0) {
         let hits = searchResults.hits

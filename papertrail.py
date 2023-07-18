@@ -4,23 +4,22 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import sqlite3
-from sre_constants import ANY_ALL
 import subprocess
 import sys
-import socket
 import threading
 import time
 from pathlib import Path
 
 import aiohttp
 import aiohttp.web
+import doctr.io
+import doctr.models
 import doctr.models.predictor.pytorch
 import typesense
 import typesense.client
 import typesense.exceptions
-from doctr.io import DocumentFile
-from doctr.models import ocr_predictor
 
 
 class TypesenseBridgeException(Exception):
@@ -49,19 +48,32 @@ class PaperTrailService:
         self.typesense_binary = Path(typesense_binary or "typesense-server")
         if not self.typesense_binary.exists():
             raise TypesenseBridgeException("Cannot find typesense-server")
+        if "DOCTR_CACHE_DIR" not in os.environ:
+            doctr_cache = work_dir / 'doctr-cache'
+            if not doctr_cache.exists() and (self.curr_dir / 'doctr-cache').exists():
+                doctr_cache = (self.curr_dir / 'doctr-cache')
+            if not doctr_cache.exists():
+                doctr_cache.mkdir()
+            os.environ["DOCTR_CACHE_DIR"] = doctr_cache.absolute().as_posix()
+
         self.typesense_work_dir = self.work_dir / 'typesense'
         self.typesense_work_dir.mkdir(exist_ok=True)
         self.client: typesense.Client | None = None
         self.typesense_server: subprocess.Popen[bytes] | None = None
         self.model: doctr.models.predictor.pytorch.OCRPredictor | None = None
         self.tasks = {}
+        self._stop_requested = False
         self.mutex = threading.Lock()
+
+    def warm_up_doctr_cache(self):
+        self.model = doctr.models.ocr_predictor(pretrained=True)
 
     def start_analyze_all(self):
         with self.mutex:
             if "analyze" in self.tasks:
                 return
-        thrd = threading.Thread(target=lambda that: that.anal(), args=[self])
+            thrd = threading.Thread(target=lambda that: that.analyze_all(), args=[self])
+            self.tasks["analyze"] = thrd
         thrd.start()
 
     def start(self):
@@ -85,9 +97,9 @@ class PaperTrailService:
                 soc.connect(('localhost', int(8108)))
                 soc.shutdown(2)
                 break
-            except ConnectionRefusedError:
+            except ConnectionRefusedError as exc:
                 if i == 100:
-                    raise TypesenseBridgeException("Cannot stop typesense-server")
+                    raise TypesenseBridgeException("Cannot stop typesense-server") from exc
                 time.sleep(.01)
 
         # Drop pre-existing collection if any
@@ -112,7 +124,7 @@ class PaperTrailService:
             })
         except typesense.exceptions.ObjectAlreadyExists:
             pass
-        self.model = ocr_predictor(pretrained=True)
+        self.model = doctr.models.ocr_predictor(pretrained=True)
         app = aiohttp.web.Application()
         app.add_routes([aiohttp.web.get(r'/app/{filepath:.*}', self.websvc_app)])
         app.add_routes([aiohttp.web.get('/', self.websvc_main)])
@@ -124,14 +136,14 @@ class PaperTrailService:
         aiohttp.web.run_app(app, port=self.port)
 
     async def websvc_app(self, request: aiohttp.web.Request) -> aiohttp.web.FileResponse:
-        filepath = request.match_info['filepath']
+        filepath = request.match_info.get('filepath', '')
         if len(filepath) == 0:
             filepath = "index.html"
         abspath = self._detect_path('svelte/dist') / Path(filepath)
         return aiohttp.web.FileResponse(abspath.as_posix())
 
     async def websvc_main(self, _request: aiohttp.web.Request) -> aiohttp.web.FileResponse:
-        return aiohttp.web.FileResponse(self._detect_path('svelte/dist/index.html').as_posix())
+        raise aiohttp.web.HTTPFound('/app/')
 
     async def websvc_files(self, request: aiohttp.web.Request) -> aiohttp.web.FileResponse:
         abspath = Path('/') / Path(request.match_info['filepath'])
@@ -144,7 +156,7 @@ class PaperTrailService:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: self.scan(abspath))
         self.start_analyze_all()
-        return aiohttp.web.Response(text=abspath.as_posix(), default=str)
+        return aiohttp.web.Response(text=abspath.as_posix())
 
     async def websvc_search(self, request: aiohttp.web.Request) -> aiohttp.web.FileResponse:
         if not self.client:
@@ -166,6 +178,7 @@ class PaperTrailService:
 
     def __del__(self):
         self.client = None
+        self._stop_requested = True
         if self.typesense_server:
             self.typesense_server.kill()
 
@@ -220,10 +233,11 @@ class PaperTrailService:
     #   page3_ocr_tesseract.json
     #   page4_tags.json
     #   tags.json
-    def _analyze_file(self, fpath: Path, md5sum: str, status, conn: sqlite3.Connection | None = None):
+    def _analyze_file(self, fpath: Path, md5sum: str, status, conn: sqlite3.Connection | None = None) -> bool:
         conn = conn or sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
         sys.stderr.write(f"{status} Analyzing {fpath.as_posix()}\n")
         actions: dict[str, str] = {}
+        changed = False
         if len(md5sum) == 0:
             hash_md5 = hashlib.md5()
             with fpath.open("rb") as f:
@@ -239,12 +253,14 @@ class PaperTrailService:
             c.close()
             conn.commit()
             actions["md5sum"] = md5sum
+            changed = True
 
         metadata_dir = self.work_dir / md5sum
         metadata_dir.mkdir(parents=True, exist_ok=True)
         symlink = metadata_dir / "file"
         if not symlink.exists():
             os.symlink(fpath, symlink.as_posix())
+            changed = True
 
         ocr_data = metadata_dir / "ocr.json"
         if not ocr_data.exists():
@@ -253,11 +269,12 @@ class PaperTrailService:
                 pass
                 # doc = DocumentFile.from_pdf(fpath.as_posix())
             elif fpath.suffix.lower() in ('.jpg', '.png'):
-                doc = DocumentFile.from_images(fpath.as_posix())
+                doc = doctr.io.DocumentFile.from_images(fpath.as_posix())
             else:
                 sys.stderr.write(f"Unrecognized file extension: {fpath.as_posix()}\n")
             # Analyze
             if doc:
+                changed = True
                 ocr_data.write_text(json.dumps(self.model(doc).export()))
         if ocr_data.exists():
             json_doc = json.loads(ocr_data.read_text())
@@ -270,34 +287,44 @@ class PaperTrailService:
             contents = " ".join(words)
             typesense_dict = {
                 'filename': fpath.name,
-                'url': fpath.as_posix(),
+                'url': (Path('/files') / fpath.relative_to(Path('/'))).as_posix(),
                 'tags': [],
                 'created_at': 0,
                 'contents': contents
             }
             self.client.collections['documents'].documents.create(typesense_dict)
-            
 
-        return md5sum,
+        return changed
 
     def analyze_all(self):
-        conn = sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
-        c = conn.cursor()
-        files: dict[str, str] = {}
-        for row in c.execute('select * from fileinfo'):
-            files[row[0]] = row[3]
-        count = 0
-        total = len(files)
-        for fpath, md5sum in files.items():
-            count += 1
-            self._analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]"), conn=conn)
+        keep_going = True
+        while keep_going:
+            files: dict[str, str] = {}
+            keep_going = False
+            with self.mutex:
+                conn = sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
+                c = conn.cursor()
+                for row in c.execute('select * from fileinfo'):
+                    files[row[0]] = row[3]
+            count = 0
+            total = len(files)
+            for fpath, md5sum in files.items():
+                count += 1
+                keep_going = self._analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]"), conn=conn) or keep_going
+        with self.mutex:
+            del self.tasks["analyze"]
 
 
 parser = argparse.ArgumentParser(description='Scan Directories for duplicates')
 parser.add_argument('--work-dir', type=Path, default=None)
 parser.add_argument('--port', type=int, default=5000)
+parser.add_argument('--warm-up-doctr-cache', type=Path, default=None, help="Warm up the doctr cache")
 parser.add_argument('dirs', type=Path, nargs='*')
 args = parser.parse_args()
+if args.warm_up_doctr_cache is not None:
+    svc = PaperTrailService(work_dir=args.warm_up_doctr_cache, port=args.port)
+    svc.warm_up_doctr_cache()
+    exit(0)
 
 svc = PaperTrailService(work_dir=args.work_dir, port=args.port)
 svc.start()
