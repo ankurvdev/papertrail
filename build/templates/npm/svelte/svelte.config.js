@@ -9,6 +9,9 @@ const config = {
     preprocess: preprocess(),
 
     kit: {
+        paths: {
+            base: 'zzzsSvelte.BasePathzzze',
+        },
         adapter: adapter({
             pages: 'dist',
             assets: 'dist'

@@ -10,3 +10,5 @@ cmake-build-release
 .DS_Store
 typesense-server-data/
 .vscode*
+__pycache__
+work

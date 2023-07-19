@@ -7,6 +7,11 @@
 </script>
 
 <section class="item" transition:scale={{ duration: 1000, easing: expoInOut }}>
+	<a href="{searchResultItem.url}">{searchResultItem.filename}</a>
 	<div bind:innerHTML={searchResultItem.snippet} contenteditable />
-	<div>{searchResultItem.filename}</div>
 </section>
+<style>
+.item {
+	display: grid;
+}
+</style>

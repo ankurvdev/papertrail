@@ -79,6 +79,7 @@ class SvelteBuilder:
             raise SvelteBuilderException(f"No NPM ROOT specified: {self._buildenv.GetNpmRoot()}")
         config["npm"].setdefault("GlobalPackageRoot", self._buildenv.GetNpmRoot().as_posix())
         config["npm"].setdefault("Executable", self.npm_exe.as_posix())
+        config["svelte"].setdefault("basepath", "")
         packages = filter(len, config["svelte"].get("packages", "").split(","))
         proxies = filter(len, config["svelte"].get("proxies", "").split(","))
         # pylint: disable=C0209

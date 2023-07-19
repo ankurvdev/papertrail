@@ -28,7 +28,7 @@ if not typesense_bin.exists():
     if not archive.exists():
         x64url = 'https://dl.typesense.org/releases/0.24.1/typesense-server-0.24.1-linux-amd64.tar.gz'
         a64url = 'https://dl.typesense.org/releases/0.24.1/typesense-server-0.24.1-linux-arm64.tar.gz'
-        url = x64url if platform.machine() == 'AMD64' else a64url
+        url = x64url if platform.machine() in ('AMD64', 'x86_64') else a64url
         urllib.request.urlretrieve(url, archive.as_posix())
     tar = tarfile.open(archive.as_posix())
     tar.extractall(path=work_dir)
