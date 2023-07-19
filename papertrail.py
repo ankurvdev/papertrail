@@ -327,8 +327,8 @@ if args.warm_up_doctr_cache is not None:
     exit(0)
 
 svc = PaperTrailService(work_dir=args.work_dir, port=args.port)
-svc.start()
 for sdir in args.dirs:
     svc.scan(Path(sdir))
 svc.start_analyze_all()
+svc.start()
 svc.wait_for_stop()

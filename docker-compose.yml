@@ -1,0 +1,10 @@
+version: "3"
+services:
+  papertrail:
+    image: ghcr.io/ankurvdev/papertrail:main
+    restart: unless-stopped
+    ports:
+      - 5000:5000
+    volumes:
+      - ./test:/cache
+      - /home/ankurv/ftr:/data
