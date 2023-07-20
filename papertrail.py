@@ -118,7 +118,7 @@ class PaperTrailService:
                     {"name": "filename", "type": "string", "infix": True},
                     {"name": "url", "type": "string"},
                     {"name": "tags", "type": "string[]", "facet": True},
-                    {"name": "created_at", "type": "int32", "index": False},
+                    {"name": "created_at", "type": "int32", "index": False, "optional": True},
                     {"name": "contents", "type": "string"}
                 ],
                 "default_sorting_field": "created_at"
