@@ -2,3 +2,4 @@ rapidfuzz==2.15.1
 python-doctr[torch]
 typesense
 aiohttp
+pypdfium2

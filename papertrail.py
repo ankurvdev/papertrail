@@ -11,6 +11,8 @@ import sys
 import threading
 import time
 from pathlib import Path
+import pypdfium2
+import PyPDF2
 
 import aiohttp
 import aiohttp.web
@@ -80,7 +82,7 @@ class PaperTrailService:
         self.typesense_server = subprocess.Popen([
             self.typesense_binary.as_posix(),
             "--data-dir", self.typesense_work_dir.as_posix(),
-            "--api-key", "test"])
+            "--api-key", "test"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.client = typesense.Client({
             'api_key': 'test',
             'nodes': [{
@@ -114,10 +116,10 @@ class PaperTrailService:
             self.client.collections.create({
                 "name": "documents",
                 "fields": [
-                    {"name": "filename", "type": "string"},
+                    {"name": "filename", "type": "string", "infix": True},
                     {"name": "url", "type": "string"},
                     {"name": "tags", "type": "string[]", "facet": True},
-                    {"name": "created_at", "type": "int32", "facet": True},
+                    {"name": "created_at", "type": "int32", "index": False},
                     {"name": "contents", "type": "string"}
                 ],
                 "default_sorting_field": "created_at"
@@ -163,7 +165,8 @@ class PaperTrailService:
             raise TypesenseBridgeException("typesense client unavailable")
         loop = asyncio.get_running_loop()
         search_query = dict(request.query)
-        search_query.setdefault('query_by', 'contents,filename')
+        search_query.setdefault('query_by', 'filename,contents')
+        search_query.setdefault('infix', 'always,off')
         if 'q' not in search_query:
             raise TypesenseBridgeException("empty query")
         result = await loop.run_in_executor(None, lambda: self.client.collections['documents'].documents.search(search_query))
@@ -180,7 +183,8 @@ class PaperTrailService:
         self.client = None
         self._stop_requested = True
         if self.typesense_server:
-            self.typesense_server.kill()
+            self.typesense_server.terminate()
+            self.typesense_server.wait()
 
     def wait_for_stop(self):
         pass
@@ -262,36 +266,79 @@ class PaperTrailService:
             os.symlink(fpath, symlink.as_posix())
             changed = True
 
-        ocr_data = metadata_dir / "ocr.json"
-        if not ocr_data.exists():
-            doc = None
-            if fpath.suffix == '.pdf':
+        if len(list(metadata_dir.glob("*.textdata.json"))) == 0:
+            try:
+                doc = None
+                if fpath.suffix.lower() in ('.jpg', '.png'):
+                    doc = doctr.io.DocumentFile.from_images(fpath.as_posix())
+                    (metadata_dir / "ocr.textdata.json").write_text(json.dumps(self.model(doc).export()))
+                    changed = True
+
+                if fpath.suffix.lower() in ('.pdf'):
+                    doc = doctr.io.DocumentFile.from_pdf(fpath.as_posix())
+                    (metadata_dir / "ocr.textdata.json").write_text(json.dumps(self.model(doc).export()))
+                    changed = True
+
+                if fpath.suffix.lower() in ('.pdf'):
+                    changed = True
+                    pages = []
+                    for page in pypdfium2.PdfDocument(fpath.as_posix()):
+                        textpage = page.get_textpage()
+                        lines = []
+                        for rect in textpage.get_rectboxes():
+                            text = textpage.get_text_bounded(*rect)
+                            if len(text) == 0:
+                                continue
+                            lines.append({
+                                "words": [{"value": text, "geometry": rect}]
+                            })
+                        if len(lines) > 0:
+                            pages.append({"blocks": [{"lines": lines}]})
+
+                    if False:
+                        reader = PyPDF2.PdfReader(fpath.as_posix())
+                        lines = []
+                        pages = []
+
+                        def visitor_text(text, cm, tm, fontDict, fontSize):
+                            if len(text) == 0:
+                                return
+                            lines.append({
+                                "words": [{"value": text, "geometry": []}]
+                            })
+                            print(f"{tm}:{text}")
+                        for page in reader.pages:
+                            lines = []
+                            page.extract_text(visitor_text=visitor_text)
+                            pages.append({"blocks": [{"lines": lines}]})
+                    jsondata = {"pages": pages}
+                    (metadata_dir / "pdftext.textdata.json").write_text(json.dumps(jsondata))
+            except (pypdfium2.PdfiumError, OSError) as ex:
                 pass
-                # doc = DocumentFile.from_pdf(fpath.as_posix())
-            elif fpath.suffix.lower() in ('.jpg', '.png'):
-                doc = doctr.io.DocumentFile.from_images(fpath.as_posix())
-            else:
-                sys.stderr.write(f"Unrecognized file extension: {fpath.as_posix()}\n")
-            # Analyze
-            if doc:
-                changed = True
-                ocr_data.write_text(json.dumps(self.model(doc).export()))
-        if ocr_data.exists():
-            json_doc = json.loads(ocr_data.read_text())
-            words = []
+
+        contents = ""
+        for text_data in metadata_dir.glob("*.textdata.json"):
+            json_doc = json.loads(text_data.read_text())
+            blocks = []
             for page in json_doc["pages"]:
                 for block in page["blocks"]:
+                    lines = []
                     for line in block["lines"]:
+                        words = []
                         for word in line["words"]:
                             words.append(word["value"])
-            contents = " ".join(words)
-            typesense_dict = {
-                'filename': fpath.name,
-                'url': (Path('/files') / fpath.relative_to(Path('/'))).as_posix(),
-                'tags': [],
-                'created_at': 0,
-                'contents': contents
-            }
+                        lines.append(" ".join(words))
+                    blocks.append("\n".join(lines))
+            contents = "\n\n".join(blocks)
+
+        typesense_dict = {
+            'filename': fpath.name,
+            'url': (Path('/files') / fpath.relative_to(Path('/'))).as_posix(),
+            'tags': [],
+            'created_at': 0,
+            'contents': contents
+        }
+        if self.client:
             self.client.collections['documents'].documents.create(typesense_dict)
 
         return changed
@@ -319,8 +366,14 @@ parser = argparse.ArgumentParser(description='Scan Directories for duplicates')
 parser.add_argument('--work-dir', type=Path, default=None)
 parser.add_argument('--port', type=int, default=5000)
 parser.add_argument('--warm-up-doctr-cache', type=Path, default=None, help="Warm up the doctr cache")
+parser.add_argument('--analyze-file', type=Path, default=None, help="Analyze File")
 parser.add_argument('dirs', type=Path, nargs='*')
 args = parser.parse_args()
+if args.analyze_file is not None:
+    svc = PaperTrailService(work_dir=args.warm_up_doctr_cache, port=args.port)
+    svc._analyze_file(args.analyze_file, "", "")
+    exit(0)
+
 if args.warm_up_doctr_cache is not None:
     svc = PaperTrailService(work_dir=args.warm_up_doctr_cache, port=args.port)
     svc.warm_up_doctr_cache()
@@ -329,6 +382,5 @@ if args.warm_up_doctr_cache is not None:
 svc = PaperTrailService(work_dir=args.work_dir, port=args.port)
 for sdir in args.dirs:
     svc.scan(Path(sdir))
-svc.start_analyze_all()
 svc.start()
 svc.wait_for_stop()
