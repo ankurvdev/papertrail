@@ -12,7 +12,6 @@ import threading
 import time
 from pathlib import Path
 import pypdfium2
-import PyPDF2
 
 import aiohttp
 import aiohttp.web
