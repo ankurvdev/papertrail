@@ -40,7 +40,7 @@ class PaperTrailService:
         self.work_dir = Path(work_dir)
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.db_file = work_dir / "data.sqlite"
-        conn = sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
+        conn = self._get_sqlite_conn()
         c = conn.cursor()
         c.execute('CREATE TABLE IF NOT EXISTS fileinfo (path text PRIMARY KEY, lastmodified INTEGER, size INTEGER, md5hash char(32))')
         conn.commit()
@@ -78,21 +78,18 @@ class PaperTrailService:
         thrd.start()
 
     def start(self):
+        sys.stdout.write("Starting Typesense Service ... \n")
+        shutil.rmtree(self.typesense_work_dir.as_posix())
+        self.typesense_work_dir.mkdir(exist_ok=True)
         self.typesense_server = subprocess.Popen([
             self.typesense_binary.as_posix(),
             "--data-dir", self.typesense_work_dir.as_posix(),
             "--api-key", "test"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.client = typesense.Client({
-            'api_key': 'test',
-            'nodes': [{
-                'host': 'localhost',
-                'port': '8108',
-                'protocol': 'http'
-            }],
-            'connection_timeout_seconds': 2
-        })
 
         for i in range(100):
+            rc = self.typesense_server.poll()
+            if rc is not None:
+                raise TypesenseBridgeException(f"typesense-server couldnt start: exit-code {rc}")
             soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 soc.connect(('localhost', int(8108)))
@@ -103,29 +100,37 @@ class PaperTrailService:
                     raise TypesenseBridgeException("Cannot stop typesense-server") from exc
                 time.sleep(.01)
 
+        self.client = typesense.Client({
+            'api_key': 'test',
+            'nodes': [{
+                'host': 'localhost',
+                'port': '8108',
+                'protocol': 'http'
+            }],
+            'connection_timeout_seconds': 2
+        })
+
         # Drop pre-existing collection if any
         try:
             self.client.collections['documents'].delete()
         except typesense.exceptions.TypesenseClientError:
             pass
 
-        # Create a collection
+        self.client.collections.create({
+            "name": "documents",
+            "fields": [
+                {"name": "filename", "type": "string", "infix": True},
+                {"name": "url", "type": "string"},
+                {"name": "tags", "type": "string[]", "facet": True},
+                {"name": "created_at", "type": "int32"},
+                {"name": "contents", "type": "string"}
+            ],
+            "default_sorting_field": "created_at"
+        })
 
-        try:
-            self.client.collections.create({
-                "name": "documents",
-                "fields": [
-                    {"name": "filename", "type": "string", "infix": True},
-                    {"name": "url", "type": "string"},
-                    {"name": "tags", "type": "string[]", "facet": True},
-                    {"name": "created_at", "type": "int32"},
-                    {"name": "contents", "type": "string"}
-                ],
-                "default_sorting_field": "created_at"
-            })
-        except typesense.exceptions.ObjectAlreadyExists:
-            pass
+        sys.stdout.write("Initializing OCR Model... \n")
         self.model = doctr.models.ocr_predictor(pretrained=True)
+        sys.stdout.write("Initializing Web Service... \n")
         app = aiohttp.web.Application()
         app.add_routes([aiohttp.web.get(r'/app/{filepath:.*}', self.websvc_app)])
         app.add_routes([aiohttp.web.get('/', self.websvc_main)])
@@ -189,29 +194,34 @@ class PaperTrailService:
         pass
 
     def scan(self, scan_dir: Path):
+        files: Path = []
         for fpath in scan_dir.rglob('*'):
             if fpath.is_file():
-                self._verify_or_add_entry(fpath.absolute())
+                files.append(fpath.absolute())
+        self._verify_or_add_entry(files)
 
-    def get_all_files(self):
-        conn = sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
+    def get_all_files(self) -> dict[str, str]:
+        conn = self._get_sqlite_conn()
         c = conn.cursor()
-        c.execute('select * from fileinfo')
-        return c.fetchall()
+        c.execute('select path,md5hash from fileinfo')
+        return {row[0]: row[1] for row in c.fetchall()}
 
-    def _verify_or_add_entry(self, fpath: Path):
-        conn = sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
-        if self.verify(fpath):
-            return
-        fstat = fpath.stat()
-        mtime = fstat.st_mtime
-        size = fstat.st_size
-        c = conn.cursor()
-        c.execute('insert into fileinfo values(?,?,?,?)', (fpath.as_posix(), mtime, size, ""))
-        conn.commit()
+    def _verify_or_add_entry(self, files: list[Path]):
+        known_files = self.get_all_files()
+        for fpath in files:
+            if fpath in known_files:
+                continue
+            sys.stdout.write(f"Adding file: {fpath.as_posix()}\n")
+            fstat = fpath.stat()
+            mtime = fstat.st_mtime
+            size = fstat.st_size
+            conn = self._get_sqlite_conn()
+            c = conn.cursor()
+            c.execute('insert into fileinfo values(?,?,?,?)', (fpath.as_posix(), mtime, size, ""))
+            conn.commit()
 
     def verify(self, fpath: Path):
-        conn = sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
+        conn = self._get_sqlite_conn()
         c = conn.cursor()
         if not fpath.exists():
             c.execute('delete from fileinfo where path = ?', (fpath.as_posix(),))
@@ -228,6 +238,15 @@ class PaperTrailService:
             c.execute('update fileinfo set lastmodified = ?, size = ?, md5hash = ? where path = ? ', (mtime, size, "", fpath.as_posix()))
         return found
 
+    def _get_sqlite_conn(self):
+        for i in range(10):
+            try:
+                return sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
+            except sqlite3.Error:
+                sys.stderr.write(f"Cannot open sqlite. Attempt {i}. Retrying in 5s")
+                time.sleep(5)
+        raise TypesenseBridgeException("Cannot open sqlite")
+
     # Dir
     #   file0
     #   page0_ocr_doctr.json
@@ -236,8 +255,7 @@ class PaperTrailService:
     #   page3_ocr_tesseract.json
     #   page4_tags.json
     #   tags.json
-    def _analyze_file(self, fpath: Path, md5sum: str, status, conn: sqlite3.Connection | None = None) -> bool:
-        conn = conn or sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
+    def _analyze_file(self, fpath: Path, md5sum: str, status) -> bool:
         sys.stderr.write(f"{status} Analyzing {fpath.as_posix()}\n")
         actions: dict[str, str] = {}
         changed = False
@@ -251,6 +269,7 @@ class PaperTrailService:
             mtime = fstat.st_mtime
             size = fstat.st_size
 
+            conn = self._get_sqlite_conn()
             c = conn.cursor()
             c.execute('update fileinfo set lastmodified = ?, size = ?, md5hash = ? where path = ?', (mtime, size, md5sum, fpath.as_posix()))
             c.close()
@@ -345,18 +364,13 @@ class PaperTrailService:
     def analyze_all(self):
         keep_going = True
         while keep_going:
-            files: dict[str, str] = {}
             keep_going = False
-            with self.mutex:
-                conn = sqlite3.connect(self.db_file.as_posix(), detect_types=sqlite3.PARSE_DECLTYPES)
-                c = conn.cursor()
-                for row in c.execute('select * from fileinfo'):
-                    files[row[0]] = row[3]
+            known_files = self.get_all_files()
             count = 0
-            total = len(files)
-            for fpath, md5sum in files.items():
+            total = len(known_files)
+            for fpath, md5sum in known_files.items():
                 count += 1
-                keep_going = self._analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]"), conn=conn) or keep_going
+                keep_going = self._analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]")) or keep_going
         with self.mutex:
             del self.tasks["analyze"]
 
