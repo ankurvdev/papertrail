@@ -38,6 +38,13 @@ class PaperTrailService:
         work_dir = work_dir or (self.curr_dir / "work")
         self.port = port
         self.work_dir = Path(work_dir)
+        self.client: typesense.Client | None = None
+        self.typesense_server: subprocess.Popen[bytes] | None = None
+        self.model: doctr.models.predictor.pytorch.OCRPredictor | None = None
+        self.tasks = {}
+        self._stop_requested = False
+        self.mutex = threading.Lock()
+
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.db_file = work_dir / "data.sqlite"
         conn = self._get_sqlite_conn()
@@ -59,12 +66,6 @@ class PaperTrailService:
 
         self.typesense_work_dir = self.work_dir / 'typesense'
         self.typesense_work_dir.mkdir(exist_ok=True)
-        self.client: typesense.Client | None = None
-        self.typesense_server: subprocess.Popen[bytes] | None = None
-        self.model: doctr.models.predictor.pytorch.OCRPredictor | None = None
-        self.tasks = {}
-        self._stop_requested = False
-        self.mutex = threading.Lock()
 
     def warm_up_doctr_cache(self):
         self.model = doctr.models.ocr_predictor(pretrained=True)
