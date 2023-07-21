@@ -68,9 +68,9 @@
 	#search-results {
 		display: grid;
 		grid-auto-flow: row;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-		/* grid-template-rows: repeat(auto-fit, minmax(260px, 1fr)); */
-		grid-auto-rows: minmax(260px, 1.3fr);
-
+		grid-template-columns: repeat(auto-fit, minmax(200px, .15fr));
+		/* grid-template-rows: repeat(auto-fit, minmax(260px, .2fr)); */
+		grid-auto-rows: minmax(260px, .2fr);
+		grid-gap: 10px;
 	}
 </style>
