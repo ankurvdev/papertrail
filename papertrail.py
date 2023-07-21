@@ -205,7 +205,7 @@ class PaperTrailService:
         conn = self._get_sqlite_conn()
         c = conn.cursor()
         c.execute('select path,md5hash from fileinfo')
-        return {row[0]: row[1] for row in c.fetchall()}
+        return {Path(row[0]): row[1] for row in c.fetchall()}
 
     def _verify_or_add_entry(self, files: list[Path]):
         known_files = self.get_all_files()
