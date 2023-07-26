@@ -1,4 +1,9 @@
+# Overview
+Papertrail is a document management search engine that allows you to index your documents (OCR) and search both filenames and content
+The OCR is performed using [doctr](https://mindee.github.io/doctr/) and [typesense](https://typesense.org/) is used for the search engine functionality
+
 # Quick Start
+
 ## Docker command line
 
 `docker create --name papertrail ghcr.io/ankurvdev/papertrail:main -v ./cache:/cache -v ./docs:/data`
