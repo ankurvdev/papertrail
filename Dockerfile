@@ -1,10 +1,10 @@
-FROM fedora:latest as builder
+FROM fedora-minimal:latest as builder
 RUN dnf -y update && dnf -y install git cmake gcc g++ python python-devel nodejs-npm libglvnd-glx cairo pango libffi && dnf clean all
 ADD . /s
 RUN python -m pip install buildverse && python /s/r.py --work-dir /app
 RUN /app/venv/bin/python /s/papertrail.py --warm-up-doctr-cache=/app
 
-FROM fedora:latest
+FROM fedora-minimal:latest
 RUN dnf -y update && dnf -y install python libglvnd-glx cairo pango libffi && dnf clean all
 WORKDIR /app
 VOLUME /data
