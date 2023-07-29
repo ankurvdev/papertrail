@@ -6,7 +6,7 @@ from pathlib import Path
 import platform
 import urllib.request
 import tarfile
-import build.svelte
+import buildverse.svelte
 import os
 
 src_dir = Path(__file__).parent
@@ -39,7 +39,7 @@ svelte_dir = work_dir / 'svelte'
 os.environ['DEVEL_BUILDPATH'] = svelte_dir.as_posix()
 os.environ['DEVEL_BINPATH'] = (work_dir / 'bin').as_posix()
 os.environ['NPM_BUILD_ROOT'] = (work_dir /'npm').as_posix()
-builder = build.svelte.SvelteBuilder(reporoot=src_dir, subdir=src_dir / 'web', buildroot=svelte_dir, out_file_list=None)
+builder = buildverse.svelte.SvelteBuilder(reporoot=src_dir, subdir=src_dir / 'web', buildroot=svelte_dir, out_file_list=None)
 builder.generate()
 builder.build()
 print(src_dir)
