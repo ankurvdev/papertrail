@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-import sys
 import argparse
-import subprocess
-from pathlib import Path
-import platform
-import urllib.request
-import tarfile
-import buildverse.svelte
 import os
+import subprocess
+import sys
+from pathlib import Path
+
+import buildverse.externaltools
+import buildverse.svelte
 
 src_dir = Path(__file__).parent
 parser = argparse.ArgumentParser()
@@ -22,17 +21,7 @@ if not venv_dir.exists():
     subprocess.check_call([sys.executable, "-m", "venv", venv_dir.as_posix()])
     subprocess.check_call([(venv_dir / "bin" / "pip").as_posix(), "install", "-r", (src_dir / "requirements.txt").as_posix()])
 
-typesense_bin = work_dir / 'typesense-server'
-if not typesense_bin.exists():
-    archive = work_dir / 'typesense-server.tar.gz'
-    if not archive.exists():
-        x64url = 'https://dl.typesense.org/releases/0.24.1/typesense-server-0.24.1-linux-amd64.tar.gz'
-        a64url = 'https://dl.typesense.org/releases/0.24.1/typesense-server-0.24.1-linux-arm64.tar.gz'
-        url = x64url if platform.machine() in ('AMD64', 'x86_64') else a64url
-        urllib.request.urlretrieve(url, archive.as_posix())
-    tar = tarfile.open(archive.as_posix())
-    tar.extractall(path=work_dir)
-    tar.close()
+typesense_bin = buildverse.externaltools.GetBinary('typesense', work_dir)
 
 svelte_dir = work_dir / 'svelte'
 (work_dir / 'bin').mkdir(exist_ok=True)

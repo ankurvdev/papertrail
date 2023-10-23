@@ -11,13 +11,13 @@ import sys
 import threading
 import time
 from pathlib import Path
-import pypdfium2
 
 import aiohttp
 import aiohttp.web
 import doctr.io
 import doctr.models
 import doctr.models.predictor.pytorch
+import pypdfium2
 import typesense
 import typesense.client
 import typesense.exceptions
@@ -328,12 +328,12 @@ class PaperTrailService:
                             })
                             print(f"{tm}:{text}")
                         for page in reader.pages:
-                            lines = []
                             page.extract_text(visitor_text=visitor_text)
                             pages.append({"blocks": [{"lines": lines}]})
                     jsondata = {"pages": pages}
                     (metadata_dir / "pdftext.textdata.json").write_text(json.dumps(jsondata))
-            except (pypdfium2.PdfiumError, OSError) as ex:
+            except (pypdfium2.PdfiumError, OSError) as exc:
+                sys.stderr.write(f"Error Processing PDF: {str(exc)}\n")
                 pass
 
         contents = ""
@@ -391,12 +391,12 @@ args = parser.parse_args()
 if args.analyze_file is not None:
     svc = PaperTrailService(work_dir=args.warm_up_doctr_cache, port=args.port)
     svc._analyze_file(args.analyze_file, "", "")
-    exit(0)
+    sys.exit(0)
 
 if args.warm_up_doctr_cache is not None:
     svc = PaperTrailService(work_dir=args.warm_up_doctr_cache, port=args.port)
     svc.warm_up_doctr_cache()
-    exit(0)
+    sys.exit(0)
 
 svc = PaperTrailService(work_dir=args.work_dir, port=args.port)
 for sdir in args.dirs:

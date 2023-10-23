@@ -5,5 +5,5 @@ torchvision>=0.15.2+cpu
 -f https://download.pytorch.org/whl/torch_stable.html
 python-doctr[torch]
 typesense
-aiohttp
+aiohttp>=3.9.0b0
 pypdfium2
