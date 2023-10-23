@@ -21,7 +21,7 @@ if not venv_dir.exists():
     subprocess.check_call([sys.executable, "-m", "venv", venv_dir.as_posix()])
     subprocess.check_call([(venv_dir / "bin" / "pip").as_posix(), "install", "-r", (src_dir / "requirements.txt").as_posix()])
 
-typesense_bin = buildverse.externaltools.GetBinary('typesense', binpath=work_dir)
+typesense_bin = buildverse.externaltools.GetBinary('typesense-server', binpath=work_dir)
 
 svelte_dir = work_dir / 'svelte'
 (work_dir / 'bin').mkdir(exist_ok=True)
