@@ -11,13 +11,13 @@ import sys
 import threading
 import time
 from pathlib import Path
-import pypdfium2
 
 import aiohttp
 import aiohttp.web
 import doctr.io
 import doctr.models
 import doctr.models.predictor.pytorch
+import pypdfium2
 import typesense
 import typesense.client
 import typesense.exceptions
@@ -282,6 +282,7 @@ class PaperTrailService:
         metadata_dir.mkdir(parents=True, exist_ok=True)
         symlink = metadata_dir / "file"
         if not symlink.exists():
+            symlink.unlink(missing_ok=True)
             os.symlink(fpath, symlink.as_posix())
             changed = True
 
@@ -327,12 +328,12 @@ class PaperTrailService:
                             })
                             print(f"{tm}:{text}")
                         for page in reader.pages:
-                            lines = []
                             page.extract_text(visitor_text=visitor_text)
                             pages.append({"blocks": [{"lines": lines}]})
                     jsondata = {"pages": pages}
                     (metadata_dir / "pdftext.textdata.json").write_text(json.dumps(jsondata))
-            except (pypdfium2.PdfiumError, OSError) as ex:
+            except (pypdfium2.PdfiumError, OSError) as exc:
+                sys.stderr.write(f"Error Processing PDF: {str(exc)}\n")
                 pass
 
         contents = ""
@@ -371,7 +372,11 @@ class PaperTrailService:
             total = len(known_files)
             for fpath, md5sum in known_files.items():
                 count += 1
-                keep_going = self._analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]")) or keep_going
+                try:
+                    keep_going = self._analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]")) or keep_going
+                except OSError as exc:
+                    sys.stderr.write(f"Cannot Analyze {str(fpath)}: {str(exc)}")
+                    
         with self.mutex:
             del self.tasks["analyze"]
 
@@ -386,12 +391,12 @@ args = parser.parse_args()
 if args.analyze_file is not None:
     svc = PaperTrailService(work_dir=args.warm_up_doctr_cache, port=args.port)
     svc._analyze_file(args.analyze_file, "", "")
-    exit(0)
+    sys.exit(0)
 
 if args.warm_up_doctr_cache is not None:
     svc = PaperTrailService(work_dir=args.warm_up_doctr_cache, port=args.port)
     svc.warm_up_doctr_cache()
-    exit(0)
+    sys.exit(0)
 
 svc = PaperTrailService(work_dir=args.work_dir, port=args.port)
 for sdir in args.dirs:
