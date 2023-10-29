@@ -11,14 +11,18 @@ pool:
 
 stages:
   - stage:
-    steps:
-      - script: ci/run.sh build image.tar
-      - publish: image.tar
-        artifact: image
+    jobs:
+      - job:
+        steps:
+          - script: ci/run.sh build image.tar
+          - publish: image.tar
+            artifact: image
 
   - stage:
-    steps:
-      - download image.tar
-        artifact: image
-      - script: ci/run.sh test image.tar
+    jobs:
+      - job:
+        steps:
+          - download image.tar
+            artifact: image
+          - script: ci/run.sh test image.tar
 
