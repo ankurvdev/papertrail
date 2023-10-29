@@ -9,15 +9,16 @@ trigger:
 pool:
   vmImage: ubuntu-latest
 
-stage:
-  steps:
-    - script: ci/run.sh build image.tar
-    - publish: image.tar
-      artifact: image
+stages:
+  - stage:
+    steps:
+      - script: ci/run.sh build image.tar
+      - publish: image.tar
+        artifact: image
 
-stage:
-  steps:
-    - download image.tar
-      artifact: image
-    - script: ci/run.sh test image.tar
+  - stage:
+    steps:
+      - download image.tar
+        artifact: image
+      - script: ci/run.sh test image.tar
 
