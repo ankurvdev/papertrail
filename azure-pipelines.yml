@@ -22,7 +22,7 @@ stages:
     jobs:
       - job:
         steps:
-          - download image.tar
+          - download: image.tar
             artifact: image
           - script: ci/run.sh test image.tar
 
