@@ -3,7 +3,7 @@ RUN microdnf -y update && microdnf -y install git cmake gcc g++ python python-de
 RUN python -m venv /buildvenv && python -m venv /app/venv
 ADD requirements.txt /
 RUN /app/venv/bin/python -m pip install --upgrade pip -r /requirements.txt
-RUN /buildvenv/bin/python -m pip install --upgrade pip  buildverse==0.0.5
+RUN /buildvenv/bin/python -m pip install --upgrade pip  buildverse==0.0.6
 
 ADD . /s
 RUN bash -c 'if [[ -e /s/buildverse ]]; then /buildvenv/bin/python -m pip install /s/buildverse --force-reinstall; fi'
