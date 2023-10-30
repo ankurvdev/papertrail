@@ -1,0 +1,29 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage:
+    jobs:
+      - job:
+        steps:
+          - script: ci/run.sh build image.tar
+          - publish: image.tar
+            artifact: image
+
+  - stage:
+    jobs:
+      - job:
+        steps:
+          - download: current
+            artifact: image
+          - script: ci/run.sh test $(Pipeline.Workspace)/image/image.tar
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: cache
+              ArtifactName: test-output
+              StoreAsTar: true
+
+
