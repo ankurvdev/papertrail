@@ -22,5 +22,6 @@ stages:
           - script: ci/run.sh test $(Pipeline.Workspace)/image/image.tar
           - publish: cache
             artifact: test-output
+            StoreAsTar: true
 
 
