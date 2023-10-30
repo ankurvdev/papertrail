@@ -19,7 +19,7 @@ build() {
 test() {
     init
     if [[ ! $(podman image list | grep ${image_name}) ]]; then
-        if [ -e "$1" ]; then echo "Cannot find source container image (\$1): $1;" && exit -1; fi
+        if [ ! -e "$1" ]; then echo "Cannot find source container image (\$1): $1;" && exit -1; fi
         cat "$1" | podman image import - ${image_name}
     fi
     podman run --rm localhost/${image_name}
