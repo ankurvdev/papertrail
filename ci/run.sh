@@ -13,7 +13,7 @@ init() {
 build() {
     init
     podman build -t papertrail_build --rm -f $scriptdir/../Dockerfile
-    podman image save -o $1 papertrail_build
+    if [[ "$1" != "" ]]; then podman save -o $1 papertrail_build ; fi
 }
 
 test() {
@@ -28,9 +28,16 @@ test() {
     fi
     docs_dir="${work_dir}/dataset/testing_data/images/"
     cache_dir="${work_dir}/cache"
+    rm -rf ${cache_dir} || true
     mkdir -p $cache_dir
-    container_id=$(podman run -d --rm --name test -v ./dataset/testing_data/images/:/docs -v ./cache:/cache localhost/${image_name})
-    sleep 20
+    container_id=$(podman run -d --rm --name test -v ./dataset/testing_data/images/:/data:Z -v ./cache:/cache:Z localhost/${image_name})
+    logcontents="somethingelse"
+    prevlogcontents=""
+    while [ "${logcontents}" != "${prevlogcontents}" ]; do
+        sleep 60
+        prevlogcontents=$logcontents
+        logcontents=$(podman logs $container_id)
+    done
     ls -l $cache_dir
     podman logs ${container_id}
     podman stop ${container_id}
