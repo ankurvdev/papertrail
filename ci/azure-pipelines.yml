@@ -20,8 +20,10 @@ stages:
           - download: current
             artifact: image
           - script: ci/run.sh test $(Pipeline.Workspace)/image/image.tar
-          - publish: cache
-            artifact: test-output
-            StoreAsTar: true
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: cache
+              ArtifactName: test-output
+              StoreAsTar: true
 
 
