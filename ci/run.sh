@@ -23,15 +23,18 @@ test() {
         podman load --input $1
     fi
     if [ ! -e ${work_dir}/dataset ]; then 
-        if [ ! -e ${work_dir}/dataset.zip ]; then wget https://guillaumejaume.github.io/FUNSD/dataset.zip -o ${work_dir}/dataset.zip; fi
+        if [ ! -e ${work_dir}/dataset.zip ]; then curl -L https://guillaumejaume.github.io/FUNSD/dataset.zip -o ${work_dir}/dataset.zip; fi
         unzip ${work_dir}/dataset.zip -d ${work_dir}
     fi
     docs_dir="${work_dir}/dataset/testing_data/images/"
     cache_dir="${work_dir}/cache"
-    podman run --rm --name test localhost/${image_name} -v ${docs_dir}:/docs -v ${cache_dir}
+    mkdir -p $cache_dir
+    container_id=$(podman run -d --rm --name test -v ./dataset/testing_data/images/:/docs -v ./cache:/cache localhost/${image_name})
     sleep 20
     ls -l $cache_dir
-    podman stop test
+    podman logs ${container_id}
+    podman stop ${container_id}
+    podman rm ${container_id} || true
 }
 
 cmd=$1
