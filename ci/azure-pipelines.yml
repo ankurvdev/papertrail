@@ -9,7 +9,7 @@ stages:
     jobs:
       - job:
         steps:
-          - script: ci/run.sh build image.tar
+          - script: python ci/run.py container-build --export=image.tar
           - publish: image.tar
             artifact: image
 
@@ -19,7 +19,7 @@ stages:
         steps:
           - download: current
             artifact: image
-          - script: ci/run.sh test $(Pipeline.Workspace)/image/image.tar
+          - script: python ci/run.py container-test --import=$(Pipeline.Workspace)/image/image.tar
           - task: PublishBuildArtifacts@1
             inputs:
               PathtoPublish: cache
