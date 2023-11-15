@@ -265,6 +265,7 @@ class PaperTrailService:
         sys.stderr.write(f"{status} Analyzing {fpath.as_posix()}\n")
         actions: dict[str, str] = {}
         changed = False
+        actions: list[str] = []
         if len(md5sum) == 0:
             hash_md5 = hashlib.md5()
             with fpath.open("rb") as f:
@@ -281,6 +282,7 @@ class PaperTrailService:
             c.close()
             conn.commit()
             actions["md5sum"] = md5sum
+            actions.append(f"md5sum={md5sum}")
             changed = True
 
         metadata_dir = self.work_dir / md5sum
@@ -289,6 +291,7 @@ class PaperTrailService:
         if not symlink.exists():
             symlink.unlink(missing_ok=True)
             os.symlink(fpath, symlink.as_posix())
+            actions.append(f"symlink={symlink.as_posix()}")
             changed = True
 
         if len(list(metadata_dir.glob("*.textdata.json"))) == 0:
@@ -297,15 +300,16 @@ class PaperTrailService:
                 if fpath.suffix.lower() in (".jpg", ".png"):
                     doc = doctr.io.DocumentFile.from_images(fpath.as_posix())
                     (metadata_dir / "ocr.textdata.json").write_text(json.dumps(self.model(doc).export()))
+                    actions.append("ocr.textdata.json")
                     changed = True
 
                 if fpath.suffix.lower() in (".pdf"):
                     doc = doctr.io.DocumentFile.from_pdf(fpath.as_posix())
                     (metadata_dir / "ocr.textdata.json").write_text(json.dumps(self.model(doc).export()))
+                    actions.append("ocr.textdata.json")
                     changed = True
 
                 if fpath.suffix.lower() in (".pdf"):
-                    changed = True
                     pages = []
                     for page in pypdfium2.PdfDocument(fpath.as_posix()):
                         textpage = page.get_textpage()
@@ -336,6 +340,9 @@ class PaperTrailService:
                             pages.append({"blocks": [{"lines": lines}]})
                     jsondata = {"pages": pages}
                     (metadata_dir / "pdftext.textdata.json").write_text(json.dumps(jsondata))
+                    actions.append("pdftext.textdata.json")
+                    changed = True
+
             except (pypdfium2.PdfiumError, OSError) as exc:
                 sys.stderr.write(f"Error Processing PDF: {str(exc)}\n")
                 pass
@@ -364,20 +371,25 @@ class PaperTrailService:
         }
         if self.client:
             self.client.collections["documents"].documents.create(typesense_dict)
-
+        actiontext = "\t".join(actions)
+        sys.stderr.write(f"{status} \t {actiontext}\n")
         return changed
 
     def analyze_all(self):
         keep_going = True
+        analyzed: set[Path] = set()
         while keep_going:
             keep_going = False
             known_files = self.get_all_files()
+            to_analyze = set(known_files.keys()) - analyzed
             count = 0
-            total = len(known_files)
-            for fpath, md5sum in known_files.items():
+            total = len(to_analyze)
+            for fpath in to_analyze:
+                keep_going = True
+                md5sum = known_files[fpath]
                 count += 1
                 try:
-                    keep_going = self.analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]")) or keep_going
+                    self.analyze_file(Path(fpath), md5sum, ("[" + str(count) + "/" + str(total) + "]"))
                 except OSError as exc:
                     sys.stderr.write(f"Cannot Analyze {str(fpath)}: {str(exc)}")
 
