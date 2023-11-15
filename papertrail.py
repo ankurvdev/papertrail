@@ -41,8 +41,9 @@ class PaperTrailService:
         self.client: typesense.Client | None = None
         self.typesense_server: subprocess.Popen[bytes] | None = None
         self.model: doctr.models.predictor.pytorch.OCRPredictor | None = None
+        self.server_thread: threading.Thread | None = None
         self.tasks: dict[str, threading.Thread] = {}
-        self._stop_requested = False
+        self._stop_requested: threading.Event = threading.Event()
         self.mutex = threading.Lock()
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -78,37 +79,39 @@ class PaperTrailService:
             self.tasks["analyze"] = thrd
         thrd.start()
 
-    def start(self):
-        sys.stdout.write("Starting Typesense Service ... \n")
+    def start_typesense(self):
         shutil.rmtree(self.typesense_work_dir.as_posix())
         self.typesense_work_dir.mkdir(exist_ok=True)
-        self.typesense_server = subprocess.Popen(
-            [
-                self.typesense_binary.as_posix(),
-                f"--data-dir={self.typesense_work_dir.as_posix()}",
-                "--api-key=test",
-                "--log-dir={self.typesense_work_dir.as_posix()}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        while not self._stop_requested.is_set():
+            sys.stdout.write("Starting Typesense Service ... \n")
+            self.typesense_server = subprocess.check_call(
+                [
+                    self.typesense_binary.as_posix(),
+                    f"--data-dir={self.typesense_work_dir.as_posix()}",
+                    "--api-key=test",
+                    "--log-dir={self.typesense_work_dir.as_posix()}",
+                ]
+            )
 
-        for i in range(100):
-            rc = self.typesense_server.poll()
-            if rc is not None:
-                raise TypesenseBridgeException(f"typesense-server couldnt start: exit-code {rc}")
+    def start(self):
+        sys.stdout.write("Starting Typesense Service ... \n")
+        self.server_thread = threading.Thread(target=lambda that: that.start_typesense(), args=[self])
+        wait_time_in_seconds = 10
+        granularity = 100
+        port = 8108
+        for i in range(granularity):
+            time.sleep(wait_time_in_seconds / granularity)
             soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                soc.connect(("localhost", int(8108)))
+                soc.connect(("localhost", port))
                 soc.shutdown(2)
                 break
             except ConnectionRefusedError as exc:
-                if i == 100:
-                    raise TypesenseBridgeException("Cannot stop typesense-server") from exc
-                time.sleep(0.01)
+                if i == granularity:
+                    raise TypesenseBridgeException("Cannot start typesense-server") from exc
 
         self.client = typesense.Client(
-            {"api_key": "test", "nodes": [{"host": "localhost", "port": "8108", "protocol": "http"}], "connection_timeout_seconds": 2}
+            {"api_key": "test", "nodes": [{"host": "localhost", "port": f"{port}", "protocol": "http"}], "connection_timeout_seconds": 2}
         )
 
         # Drop pre-existing collection if any
@@ -188,7 +191,7 @@ class PaperTrailService:
 
     def __del__(self):
         self.client = None
-        self._stop_requested = True
+        self._stop_requested.set()
         if self.typesense_server:
             self.typesense_server.terminate()
             self.typesense_server.wait()
