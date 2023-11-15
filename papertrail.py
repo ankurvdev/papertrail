@@ -89,7 +89,7 @@ class PaperTrailService:
                     self.typesense_binary.as_posix(),
                     f"--data-dir={self.typesense_work_dir.as_posix()}",
                     "--api-key=test",
-                    "--log-dir={self.typesense_work_dir.as_posix()}",
+                    f"--log-dir={self.typesense_work_dir.as_posix()}",
                 ]
             )
 
