@@ -3,6 +3,7 @@ services:
   papertrail:
     #image: ghcr.io/ankurvdev/papertrail:main
     build: .
+    container_name: papertrail
     restart: unless-stopped
     ports:
       - 5000:5000
