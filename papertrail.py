@@ -384,6 +384,7 @@ class PaperTrailService:
             to_analyze = set(known_files.keys()) - analyzed
             count = 0
             total = len(to_analyze)
+            analyzed.add(to_analyze)
             for fpath in to_analyze:
                 keep_going = True
                 md5sum = known_files[fpath]
