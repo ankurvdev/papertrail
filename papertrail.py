@@ -83,7 +83,12 @@ class PaperTrailService:
         shutil.rmtree(self.typesense_work_dir.as_posix())
         self.typesense_work_dir.mkdir(exist_ok=True)
         self.typesense_server = subprocess.Popen(
-            [self.typesense_binary.as_posix(), "--data-dir", self.typesense_work_dir.as_posix(), "--api-key", "test"],
+            [
+                self.typesense_binary.as_posix(),
+                f"--data-dir={self.typesense_work_dir.as_posix()}",
+                "--api-key=test",
+                "--log-dir={self.typesense_work_dir.as_posix()}",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
