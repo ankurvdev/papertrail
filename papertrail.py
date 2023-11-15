@@ -45,6 +45,7 @@ class PaperTrailService:
         self.tasks: dict[str, threading.Thread] = {}
         self._stop_requested: threading.Event = threading.Event()
         self.mutex = threading.Lock()
+        self.server_thread = threading.Thread(target=lambda that: that.start_typesense(), args=[self])
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.db_file = work_dir / "data.sqlite"
@@ -94,8 +95,7 @@ class PaperTrailService:
             )
 
     def start(self):
-        sys.stdout.write("Starting Typesense Service ... \n")
-        self.server_thread = threading.Thread(target=lambda that: that.start_typesense(), args=[self])
+        self.server_thread.start()
         wait_time_in_seconds = 10
         granularity = 100
         port = 8108

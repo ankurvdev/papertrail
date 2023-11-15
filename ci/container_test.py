@@ -1,4 +1,5 @@
 import datetime
+import shlex
 import shutil
 import subprocess
 import sys
@@ -103,11 +104,15 @@ def container_test(work_dir: Path | str | None = None, image_name: str = "papert
         Path("/data/ocrmypdf"): download_ocrmypdf_tests_dataset(work_dir),
     }
     rwvolumes: dict[Path, Path] = {Path("/cache"): clean_cache_dir(work_dir)}
-    container_id = subprocess.check_output(
+    cmd = (
         [container(), "run", "-d", "--rm", "--name", container_name]
         + [cmdarg for mnt, src in rovolumes.items() for cmdarg in ["-v", f"{src.absolute().as_posix()}:{mnt.as_posix()}:ro,Z"]]
         + [cmdarg for mnt, src in rwvolumes.items() for cmdarg in ["-v", f"{src.absolute().as_posix()}:{mnt.as_posix()}:Z"]]
-        + [f"localhost/{image_name}"],
+        + [f"localhost/{image_name}"]
+    )
+    sys.stderr.write(f"Executing...\n{shlex.join(cmd)}\n")
+    container_id = subprocess.check_output(
+        cmd,
         text=True,
     ).strip()
 
