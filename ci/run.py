@@ -45,14 +45,24 @@ def merge_path(fpath: Path | str | None, work_dir: Path | str | None):
         return Path(work_dir or ".") / fpath
 
 
-def container_build(image_name: str = f"{PROJECT_NAME}_build", export_file: Path | str | None = None, work_dir: Path | str | None = None):
+def container_build(
+    image_name: str = f"{PROJECT_NAME}_build",
+    export_file: Path | str | None = None,
+    work_dir: Path | str | None = None,
+    single_venv: bool = False,
+):
     subprocess.check_call([container(), "build", "-t", image_name, "--rm", "-f", (SCRIPT_DIR.parent / "Dockerfile").as_posix()])
     export_file = merge_path(export_file, work_dir)
     if export_file:
         subprocess.check_call([container(), "save", "-o", export_file.as_posix(), image_name])
 
 
-def container_test(image_name: str = f"{PROJECT_NAME}_build", import_file: Path | str | None = None, work_dir: Path | str | None = None):
+def container_test(
+    image_name: str = f"{PROJECT_NAME}_build",
+    import_file: Path | str | None = None,
+    work_dir: Path | str | None = None,
+    single_venv: bool = False,
+):
     image_list = subprocess.check_output([container(), "image", "list"], text=True)
     if image_name not in image_list:
         import_file = merge_path(import_file, work_dir)
@@ -71,13 +81,13 @@ def find_venv_python(venv_dir: Path):
     return venv_python
 
 
-def build(work_dir: Path | str | None = None):
+def build(work_dir: Path | str | None = None, single_venv: bool = False):
     work_dir = Path(work_dir or ".").absolute()
     src_dir = SCRIPT_DIR.parent.absolute()
     work_dir.mkdir(exist_ok=True, parents=True)
     if not in_venv():
         buildvenv_dir = work_dir / "build_venv"
-        appvenv_dir = work_dir / "venv"
+        appvenv_dir = work_dir / "venv" if not single_venv else buildvenv_dir
         subprocess.check_call([sys.executable, "-m", "venv", buildvenv_dir.as_posix()])
         subprocess.check_call([sys.executable, "-m", "venv", appvenv_dir.as_posix()])
 
@@ -92,7 +102,7 @@ def build(work_dir: Path | str | None = None):
     if (src_dir / "buildverse").exists():
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", (src_dir / "buildverse").as_posix()])
     else:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse==0.0.7"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse==0.0.8"])
     build_svelte(work_dir)
     warm_doctr_cache(work_dir)
 
@@ -105,7 +115,7 @@ def warm_doctr_cache(work_dir: Path):
     )
 
 
-def build_svelte(work_dir: Path):
+def build_svelte(work_dir: Path, single_venv: bool = False):
     import buildverse.externaltools
     import buildverse.svelte
 
@@ -127,6 +137,7 @@ def build_svelte(work_dir: Path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--work-dir", type=Path, default=Path(), help="Working Directory")
+    parser.add_argument("--single-venv", action="store_true", default=False, help="Single Venv")
     subparsers = parser.add_subparsers(help="sub-command help")
 
     container_build_parser = subparsers.add_parser("container-build", help="container Build")

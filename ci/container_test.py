@@ -67,7 +67,7 @@ def test_scanning(work_dir: Path, data_volumes: dict[Path, Path]):
     cache_dir = work_dir / "cache"
     time.sleep(5)
     if not (cache_dir / "data.sqlite").exists():
-        raise
+        raise PaperTrailTestException("Cannot find data.sqlite")
     pending = set(
         [
             mnt_point / fpath.relative_to(src_path)

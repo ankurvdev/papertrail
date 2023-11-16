@@ -1,6 +1,6 @@
---extra-index-url=https://download.pytorch.org/whl
-torch==2.1.0+cpu
-torchvision==0.16.0+cpu
+--extra-index-url=https://download.pytorch.org/whl/cpu
+torch>=2.1.0+cpu
+torchvision>=0.16.0+cpu
 python-doctr[torch]
 typesense
 aiohttp>=3.9.0b0
