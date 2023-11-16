@@ -281,7 +281,6 @@ class PaperTrailService:
             c.execute("update fileinfo set lastmodified = ?, size = ?, md5hash = ? where path = ?", (mtime, size, md5sum, fpath.as_posix()))
             c.close()
             conn.commit()
-            actions["md5sum"] = md5sum
             actions.append(f"md5sum={md5sum}")
             changed = True
 
