@@ -102,7 +102,7 @@ def build(work_dir: Path | str | None = None, single_venv: bool = False):
     if (src_dir / "buildverse").exists():
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", (src_dir / "buildverse").as_posix()])
     else:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse>=0.0.10"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse>=0.0.11"])
     build_svelte(work_dir)
     # warm doctr cache
     src_dir = SCRIPT_DIR.parent.absolute()
