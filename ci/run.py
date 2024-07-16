@@ -102,24 +102,18 @@ def build(work_dir: Path | str | None = None, single_venv: bool = False):
     if (src_dir / "buildverse").exists():
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", (src_dir / "buildverse").as_posix()])
     else:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse==0.0.8"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse>=0.0.9"])
     build_svelte(work_dir)
-    warm_doctr_cache(work_dir)
-
-
-def warm_doctr_cache(work_dir: Path):
+    # warm doctr cache
     src_dir = SCRIPT_DIR.parent.absolute()
-    appvenv_dir = work_dir / "venv"
-    subprocess.check_call(
-        [find_venv_python(appvenv_dir), (src_dir / "papertrail.py").as_posix(), f"--warm-up-doctr-cache={work_dir.as_posix()}"]
-    )
+    subprocess.check_call([sys.executable, (src_dir / "papertrail.py").as_posix(), f"--warm-up-doctr-cache={work_dir.as_posix()}"])
 
 
 def build_svelte(work_dir: Path, single_venv: bool = False):
     import buildverse.externaltools
     import buildverse.svelte
 
-    buildverse.externaltools.GetBinary("typesense-server", binpath=work_dir)
+    buildverse.externaltools.get_binary("typesense-server", binpath=work_dir)
 
     svelte_dir = work_dir / "svelte"
     (work_dir / "bin").mkdir(exist_ok=True)
