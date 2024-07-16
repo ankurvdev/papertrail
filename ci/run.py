@@ -102,7 +102,7 @@ def build(work_dir: Path | str | None = None, single_venv: bool = False):
     if (src_dir / "buildverse").exists():
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", (src_dir / "buildverse").as_posix()])
     else:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse>=0.0.9"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "buildverse>=0.0.10"])
     build_svelte(work_dir)
     # warm doctr cache
     src_dir = SCRIPT_DIR.parent.absolute()
@@ -120,6 +120,7 @@ def build_svelte(work_dir: Path, single_venv: bool = False):
     os.environ["DEVEL_BUILDPATH"] = svelte_dir.as_posix()
     os.environ["DEVEL_BINPATH"] = (work_dir / "bin").as_posix()
     os.environ["NPM_BUILD_ROOT"] = (work_dir / "npm").as_posix()
+    os.environ["VCPKG_ROOT"] = (work_dir / "vcpkg").as_posix()
     src_dir = SCRIPT_DIR.parent.absolute()
 
     builder = buildverse.svelte.SvelteBuilder(reporoot=src_dir, subdir=src_dir / "web", buildroot=svelte_dir, out_file_list=None)
