@@ -21,7 +21,7 @@ CRNNModel::CRNNModel()
     file.close();
 }
 
-float ResizeComputeRatio(cv::Mat& img, int modelHeight)
+/* static float ResizeComputeRatio(cv::Mat& img, int modelHeight)
 {
     float ratio = float(img.cols) / float(img.rows);
     if (ratio < 1.0)
@@ -33,7 +33,7 @@ float ResizeComputeRatio(cv::Mat& img, int modelHeight)
 
     return ratio;
 }
-
+ */
 // Greedy decoding
 std::string CRNNModel::GreedyDecode(torch::Tensor& input, int /* size */)
 {

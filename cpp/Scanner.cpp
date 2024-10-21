@@ -44,7 +44,7 @@ void Scanner::process(std::filesystem::path& fpath)
     {
         int runs = 1;
         // Load in image into openCV Mat (bW or color)
-        cv::Mat matInput = detection.LoadMat(fpath, false, true).clone();
+        cv::Mat matInput = CraftModel::LoadMat(fpath, false, true).clone();
         // resizes input if we need to
         HeatMapRatio processed = detection.ResizeAspect(matInput);
         cv::Mat      clone     = processed.img.clone();
