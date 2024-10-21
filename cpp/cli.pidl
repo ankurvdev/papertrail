@@ -1,0 +1,16 @@
+struct SearchArgs {
+    list<string>    scan        (Description = "List of directories to scan"),
+    list<string>    file        (Description = "List of files to read"),
+    string          work_dir ="."    (Description = "Cache storage")
+    bool            console = false
+    bool            debug   = false
+    bool            verbose = false
+    uint16          port    = 41118
+}
+
+struct Item {
+    string path
+    timestamp lastmodified
+    uint64 size
+    string md5hash
+}
