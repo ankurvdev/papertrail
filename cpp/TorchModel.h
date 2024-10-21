@@ -14,7 +14,7 @@ class TorchModel
     public:
     TorchModel();
     ~TorchModel() = default;
-    bool          LoadModel(const std::string& modelPath);
+    bool          LoadModel(const std::string& data);
     torch::Tensor Predict(const std::vector<torch::Tensor>& input);
     // void           ChangeDevice(const torch::DeviceType& deviceSet, const size_t& index);
     torch::Tensor  ConvertToTensor(const cv::Mat& img, bool normalize = false, bool color = true);
