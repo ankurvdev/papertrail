@@ -1,4 +1,5 @@
 #include "CRAFT.h"
+#include "TorchModel.h"
 
 #include <cmath>
 
@@ -46,7 +47,7 @@ HeatMapRatio CraftModel::ResizeAspect(cv::Mat& img)
     return output;
 }
 
-std::vector<BoundingBox> CraftModel::MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, int height, int width)
+static std::vector<BoundingBox> MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, int height, int width)
 {
     // represents how much we change the top left Y
     std::sort(dets.begin(), dets.end(), boxSorter());
@@ -135,16 +136,15 @@ std::vector<BoundingBox> CraftModel::MergeBoundingBoxes(std::vector<BoundingBox>
     }
     return merged;
 }
-
-std::vector<BoundingBox> CraftModel::GetBoundingBoxes(const torch::Tensor& /* input */,
-                                                      const torch::Tensor& output,
-                                                      float /* textThresh */,
-                                                      float linkThresh,
-                                                      float lowText)
+static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input */,
+                                                 const torch::Tensor&   output,
+                                                 [[maybe_unused]] float textThresh = .7,
+                                                 float                  linkThresh = .4,
+                                                 float                  lowText    = .4)
 {
     std::vector<BoundingBox> detBoxes;
-    cv::Mat                  linkMap     = ConvertToMat(output.select(2, 0).unsqueeze(0).clone(), true, true, false, false).clone();
-    cv::Mat                  textMap     = ConvertToMat(output.select(2, 1).unsqueeze(0).clone(), true, true, false, false).clone();
+    cv::Mat                  linkMap = TorchModel::ConvertToMat(output.select(2, 0).unsqueeze(0).clone(), true, true, false, false).clone();
+    cv::Mat                  textMap = TorchModel::ConvertToMat(output.select(2, 1).unsqueeze(0).clone(), true, true, false, false).clone();
     auto                     tempTextMap = output.select(2, 1).unsqueeze(0).clone();
     int                      r           = linkMap.rows;
     int                      c           = linkMap.cols;
