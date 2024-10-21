@@ -1,9 +1,11 @@
 #include "CRAFT.h"
 
+#include <cmath>
+
 #include <algorithm>
 
 using namespace torch::indexing;
-HeatMapRatio CraftModel::resizeAspect(cv::Mat& img)
+HeatMapRatio CraftModel::ResizeAspect(cv::Mat& img)
 {
     HeatMapRatio output;
     try
@@ -14,7 +16,8 @@ HeatMapRatio CraftModel::resizeAspect(cv::Mat& img)
         float     width      = img.cols;
         float     targetSize = std::max(height, width);
         const int canvasSize = 2560;
-        int       targetH, targetW;
+        int       targetH    = 0;
+        int       targetW    = 0;
         if (targetSize > canvasSize) { targetSize = canvasSize; }
         float ratio = targetSize / std::max(height, width);
         targetH     = int(height * ratio);
@@ -31,25 +34,26 @@ HeatMapRatio CraftModel::resizeAspect(cv::Mat& img)
         cv::Range colRange = cv::Range(0, cv::min(resized.cols, img.cols));    // select maximum allowed cols
         cv::Range rowRange = cv::Range(0, cv::min(resized.rows, img.rows));    // select maximum allowed cols
         img(rowRange, colRange).clone().copyTo(resized(rowRange, colRange));
-        cv::Size heatMapSize = cv::Size(int(targetW / 2), int(targetH / 2));
+        cv::Size heatMapSize = cv::Size((targetW / 2), (targetH / 2));
         output.ratio         = ratio;
         output.heatMapSize   = heatMapSize;
         output.img           = resized;
-        this->ratio          = ratio;
+        ratio                = ratio;
     } catch (std::exception& e)
     {
         std::cout << e.what() << std::endl;
     }
     return output;
 }
-std::vector<BoundingBox> CraftModel::mergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, int height, int width)
+
+std::vector<BoundingBox> CraftModel::MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, int height, int width)
 {
     // represents how much we change the top left Y
     std::sort(dets.begin(), dets.end(), boxSorter());
     bool                     merge = false;
     std::vector<BoundingBox> merged;
-    int                      newTopLeft;
-    bool                     firstRun = true;
+    int                      newTopLeft = 0;
+    bool                     firstRun   = true;
     for (size_t i = 0; i < dets.size(); i++)
     {
         cv::Point newBottomRight = dets[i].bottomRight;
@@ -104,9 +108,9 @@ std::vector<BoundingBox> CraftModel::mergeBoundingBoxes(std::vector<BoundingBox>
                 // margin
                 newBox.topLeft.y *= .998;
                 newBox.topLeft.x *= .998;
-                if (newBox.topLeft.y < 0) { newBox.topLeft.y = 0; }
+                newBox.topLeft.y = std::max(newBox.topLeft.y, 0);
 
-                if (newBox.topLeft.x < 0) { newBox.topLeft.x = 0; }
+                newBox.topLeft.x = std::max(newBox.topLeft.x, 0);
                 newBox.topLeft.x = int(newBox.topLeft.x);
                 newBox.topLeft.y = int(newBox.topLeft.y);
 
@@ -132,35 +136,40 @@ std::vector<BoundingBox> CraftModel::mergeBoundingBoxes(std::vector<BoundingBox>
     return merged;
 }
 
-std::vector<BoundingBox> CraftModel::getBoundingBoxes(const torch::Tensor& /* input */,
+std::vector<BoundingBox> CraftModel::GetBoundingBoxes(const torch::Tensor& /* input */,
                                                       const torch::Tensor& output,
                                                       float /* textThresh */,
                                                       float linkThresh,
                                                       float lowText)
 {
     std::vector<BoundingBox> detBoxes;
-    cv::Mat                  linkMap     = this->convertToMat(output.select(2, 0).unsqueeze(0).clone(), true, true, false, false).clone();
-    cv::Mat                  textMap     = this->convertToMat(output.select(2, 1).unsqueeze(0).clone(), true, true, false, false).clone();
+    cv::Mat                  linkMap     = ConvertToMat(output.select(2, 0).unsqueeze(0).clone(), true, true, false, false).clone();
+    cv::Mat                  textMap     = ConvertToMat(output.select(2, 1).unsqueeze(0).clone(), true, true, false, false).clone();
     auto                     tempTextMap = output.select(2, 1).unsqueeze(0).clone();
     int                      r           = linkMap.rows;
     int                      c           = linkMap.cols;
-    cv::Mat                  linkScore, textScore;
+    cv::Mat                  linkScore;
+    cv::Mat                  textScore;
     cv::threshold(linkMap, linkScore, (linkThresh * 255), 255, 0);
     cv::threshold(textMap, textScore, (lowText * 255), 255, 0);
     cv::Mat outputScore = linkScore.clone() + textScore.clone();
     cv::min(cv::max(outputScore, 0), 255, outputScore);
     outputScore.convertTo(outputScore, CV_8UC3);
-    cv::Mat          labels, stats, centroids;
+    cv::Mat          labels;
+    cv::Mat          stats;
+    cv::Mat          centroids;
     std::vector<int> mapper;
     int              numLabels = cv::connectedComponentsWithStats(outputScore, labels, stats, centroids, 4, CV_32S);
     for (int i = 1; i < numLabels; i++)
     {
         int area = stats.at<int>(i, cv::CC_STAT_AREA);
-        if (area < 10) continue;
+        if (area < 10) { continue; }
         cv::Mat   segMap = cv::Mat::zeros(textMap.size(), CV_8UC1);
         cv::Mat   mask   = (labels == i);
-        double    minVal, maxVal;
-        cv::Point minLoc, maxLoc;
+        double    minVal = NAN;
+        double    maxVal = NAN;
+        cv::Point minLoc;
+        cv::Point maxLoc;
         cv::minMaxLoc(textMap, &minVal, &maxVal, &minLoc, &maxLoc, mask);
         mapper.push_back(i);
         segMap.setTo(255, labels == i);
@@ -171,12 +180,15 @@ std::vector<BoundingBox> CraftModel::getBoundingBoxes(const torch::Tensor& /* in
         int w     = stats.at<int>(i, cv::CC_STAT_WIDTH);
         int h     = stats.at<int>(i, cv::CC_STAT_HEIGHT);
         int niter = int(sqrt(area * cv::min(w, h) / (w * h)) * 2);
-        int sx = x - niter, ex = x + w + niter + 1, sy = y - niter, ey = y + h + niter + 1;
+        int sx    = x - niter;
+        int ex    = x + w + niter + 1;
+        int sy    = y - niter;
+        int ey    = y + h + niter + 1;
         // boundary check
-        if (sx < 0) sx = 0;
-        if (sy < 0) sy = 0;
-        if (ex >= c) ex = c;
-        if (ey >= r) ey = r;
+        if (sx < 0) { sx = 0; }
+        if (sy < 0) { sy = 0; }
+        if (ex >= c) { ex = c; }
+        if (ey >= r) { ey = r; }
         cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1 + niter, 1 + niter));
         cv::dilate(segMap(cv::Range(sy, ey), cv::Range(sx, ex)), segMap(cv::Range(sy, ey), cv::Range(sx, ex)), kernel);
         // make box
@@ -191,7 +203,7 @@ std::vector<BoundingBox> CraftModel::getBoundingBoxes(const torch::Tensor& /* in
         std::vector<cv::Point> points;
         for (int i = 0; i < 4; i++)
         {
-            float colVal;
+            float colVal = NAN;
             float rowVal = box.at<float>(i, 0);
             for (int j = 0; j < 1; j++) { colVal = box.at<float>(i, 1); }
             cv::Point point(rowVal, colVal);
@@ -228,7 +240,7 @@ std::vector<BoundingBox> CraftModel::getBoundingBoxes(const torch::Tensor& /* in
     return detBoxes;
 }
 
-cv::Mat CraftModel::normalize(const cv::Mat& img)
+cv::Mat CraftModel::Normalize(const cv::Mat& img)
 {
     std::vector<cv::Mat> channels(3);
     cv::Mat              output;
@@ -241,25 +253,25 @@ cv::Mat CraftModel::normalize(const cv::Mat& img)
     return output;
 }
 
-torch::Tensor CraftModel::preProcess(const cv::Mat& matInput)
+torch::Tensor CraftModel::PreProcess(const cv::Mat& matInput)
 {
     // Normalize the input using mean + std values from easyOCR
-    cv::Mat normedMatInput = this->normalize(matInput.clone()).clone();
+    cv::Mat normedMatInput = Normalize(matInput.clone()).clone();
     // Convert final input into a torch::Tensor from a cv::Mat
-    torch::Tensor input = this->convertToTensor(normedMatInput.clone()).clone();
+    torch::Tensor input = ConvertToTensor(normedMatInput.clone()).clone();
     return input;
 }
 
-std::vector<BoundingBox> CraftModel::runDetector(torch::Tensor& input, bool merge)
+std::vector<BoundingBox> CraftModel::RunDetector(torch::Tensor& input, bool merge)
 {
     int                        height   = input.size(2);
     int                        width    = input.size(3);
     std::vector<torch::Tensor> detInput = {input.clone()};
-    auto                       output   = this->predict(detInput).squeeze().detach().clone();
+    auto                       output   = Predict(detInput).squeeze().detach().clone();
     // auto                       ss         = std::chrono::high_resolution_clock::now();
-    auto detections = this->getBoundingBoxes(input.clone(), output.clone());
+    auto detections = GetBoundingBoxes(input.clone(), output.clone());
     // custom bounding box merging
-    if (merge) detections = this->mergeBoundingBoxes(detections, .97, height, width);
+    if (merge) { detections = MergeBoundingBoxes(detections, .97, height, width); }
     // auto ee = std::chrono::high_resolution_clock::now();
     // auto difff = ee - ss;
     // std::cout << "TOTAL preprocessing TIME " << std::chrono::duration <double, std::milli>(difff).count() << " ms" << std::endl;

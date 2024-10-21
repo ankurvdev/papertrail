@@ -42,16 +42,16 @@ class CraftModel : public TorchModel
 {
 
     public:
-    HeatMapRatio             resizeAspect(cv::Mat& img);
-    cv::Mat                  normalize(const cv::Mat& img);
-    std::vector<BoundingBox> getBoundingBoxes(const torch::Tensor& input,
+    HeatMapRatio             ResizeAspect(cv::Mat& img);
+    static cv::Mat           Normalize(const cv::Mat& img);
+    std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& input,
                                               const torch::Tensor& output,
                                               float                textThresh = .7,
                                               float                linkThresh = .4,
                                               float                lowText    = .4);
-    torch::Tensor            preProcess(const cv::Mat& matInput);
-    std::vector<BoundingBox> mergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, int height, int width);
-    std::vector<BoundingBox> runDetector(torch::Tensor& input, bool merge);
+    torch::Tensor            PreProcess(const cv::Mat& matInput);
+    std::vector<BoundingBox> MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, int height, int width);
+    std::vector<BoundingBox> RunDetector(torch::Tensor& input, bool merge);
     // stores the last computed ratio (resize/rescale) from input image.
     float ratio;
 };

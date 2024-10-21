@@ -4,7 +4,7 @@
 #include <tuple>
 using namespace torch::indexing;
 
-CRNNModel::CRNNModel() : TorchModel()
+CRNNModel::CRNNModel()
 {
     // eventually read from a config!
     std::string   filename = "english_g2_characters.txt";
@@ -14,14 +14,14 @@ CRNNModel::CRNNModel() : TorchModel()
     std::string line;
     std::getline(file, line);
     // add blank token
-    this->characters.push_back(' ');
+    characters.push_back(' ');
     // Convert string to vector of characters
-    for (char c : line) { this->characters.push_back(c); }
+    for (char c : line) { characters.push_back(c); }
 
     file.close();
 }
 
-float resizeComputeRatio(cv::Mat& img, int modelHeight)
+float ResizeComputeRatio(cv::Mat& img, int modelHeight)
 {
     float ratio = float(img.cols) / float(img.rows);
     if (ratio < 1.0)
@@ -35,7 +35,7 @@ float resizeComputeRatio(cv::Mat& img, int modelHeight)
 }
 
 // Greedy decoding
-std::string CRNNModel::greedyDecode(torch::Tensor& input, int /* size */)
+std::string CRNNModel::GreedyDecode(torch::Tensor& input, int /* size */)
 {
     // int               length     = size;
     std::vector<int>  ignoreList = {0};
@@ -49,7 +49,7 @@ std::string CRNNModel::greedyDecode(torch::Tensor& input, int /* size */)
     for (int i = 0; i < result.size(0); i++)
     {
         int index = result[i].item<int>();
-        if (index >= 0 && index < static_cast<int>(this->characters.size())) { extracted.push_back(this->characters[index]); }
+        if (index >= 0 && index < static_cast<int>(characters.size())) { extracted.push_back(characters[index]); }
     }
     // Join the extracted characters into a single string
     std::string text(extracted.begin(), extracted.end());
@@ -58,7 +58,7 @@ std::string CRNNModel::greedyDecode(torch::Tensor& input, int /* size */)
 
 // still need to implement beam search
 
-torch::Tensor CRNNModel::preProcess(cv::Mat& det)
+torch::Tensor CRNNModel::PreProcess(cv::Mat& det)
 {
     // Default model height used in easyOCR
     // float ratio = resizeComputeRatio(det, 64);
@@ -68,11 +68,11 @@ torch::Tensor CRNNModel::preProcess(cv::Mat& det)
     //  det.convertTo(det, -1, alpha, beta);
 
     // at least 128 in length
-    auto processedTensor = this->normalizePad(det, 256);
+    auto processedTensor = NormalizePad(det, 256);
     return processedTensor;
 }
 
-std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& /* maxWidth */)
+std::vector<TextResult> CRNNModel::Recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& /* maxWidth */)
 {
     // returns max width for padding and resize
     std::vector<torch::Tensor> processed;
@@ -84,11 +84,11 @@ std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv:
         cv::Mat    det = img(cv::Rect(x.topLeft.x, x.topLeft.y, (x.bottomRight.x - x.topLeft.x), (x.bottomRight.y - x.topLeft.y))).clone();
         if (det.rows < 5) continue;
 
-        torch::Tensor              processedTensor = this->preProcess(det);
+        torch::Tensor              processedTensor = PreProcess(det);
         std::vector<torch::Tensor> input{processedTensor.unsqueeze(0)};
 
         // auto          ss     = std::chrono::high_resolution_clock::now();
-        torch::Tensor output = this->predict(input);
+        torch::Tensor output = Predict(input);
         // auto          ee     = std::chrono::high_resolution_clock::now();
         //  auto          difff  = ee - ss;
         //  std::cout << "TOTAL INFERENCE RECORNGITON TIME " << std::chrono::duration <double, std::milli>(difff).count() << " ms" <<
@@ -101,7 +101,7 @@ std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv:
         torch::Tensor predIndex;
         std::tie(std::ignore, predIndex) = prob.max(2);
         predIndex                        = predIndex.view({-1});
-        std::string text                 = this->greedyDecode(predIndex, predIndex.size(0));
+        std::string text                 = GreedyDecode(predIndex, predIndex.size(0));
         res.text                         = text;
         res.confidence                   = *prob.data_ptr<float>();
         res.coords                       = x;
@@ -113,16 +113,16 @@ std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv:
     return results;
 }
 
-torch::Tensor CRNNModel::normalizePad(cv::Mat& processed, int maxWidth)
+torch::Tensor CRNNModel::NormalizePad(cv::Mat& processed, int maxWidth)
 {
     std::vector<torch::Tensor> input;
-    auto                       converted = this->convertToTensor(processed.clone(), true, false).squeeze(0);
+    auto                       converted = ConvertToTensor(processed.clone(), true, false).squeeze(0);
     torch::Tensor              pad       = torch::zeros({1, converted.size(1), maxWidth});
     converted                            = (converted - (.5) / (.5));
     if (maxWidth > converted.size(2))
     {
         pad.narrow(2, 0, converted.size(2)).copy_(converted.detach());
-        auto padded = this->convertToMat(converted, true, true, false, false);
+        auto padded = ConvertToMat(converted, true, true, false, false);
         // cv::imwrite("Padded.jpg", padded);
         converted = pad.clone();
     }

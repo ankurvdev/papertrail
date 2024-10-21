@@ -7,28 +7,28 @@ TorchModel::TorchModel()
     if (torch::cuda::device_count() > 0)
     {
         torch::Device defaultDevice(torch::kCUDA, 0);
-        this->device = defaultDevice;
+        device = defaultDevice;
     }
     else
     {
         torch::Device defaultCpu = torch::kCPU;
-        this->device             = defaultCpu;
+        device                   = defaultCpu;
     }
 }
 
-bool TorchModel::loadModel(const std::filesystem::path& modelPath)
+bool TorchModel::LoadModel(const std::filesystem::path& modelPath)
 {
     bool success = false;
     try
     {
 
         // auto startModel = chrono::steady_clock::now();
-        this->model = torch::jit::load(modelPath.c_str());
-        this->model.to(this->device);
+        model = torch::jit::load(modelPath.c_str());
+        model.to(device);
         // auto endModel = chrono::steady_clock::now();
         // auto diff = endModel - startModel;
         // std::cout <<"MODEL TIME "<< chrono::duration <double, milli> (diff).count() << " ms"<<std::endl;
-        this->model.eval();
+        model.eval();
         success = true;
 
     } catch (std::exception& e)
@@ -39,15 +39,15 @@ bool TorchModel::loadModel(const std::filesystem::path& modelPath)
     return success;
 }
 
-torch::Tensor TorchModel::predict(const std::vector<torch::Tensor>& input)
+torch::Tensor TorchModel::Predict(const std::vector<torch::Tensor>& input)
 {
-    torch::Tensor                   result = torch::empty({0}).to(this->device);
+    torch::Tensor                   result = torch::empty({0}).to(device);
     std::vector<torch::jit::IValue> testInputs;
-    for (auto& x : input) testInputs.push_back(x.to(this->device));
+    for (auto& x : input) testInputs.push_back(x.to(device));
 
     try
     {
-        auto res = this->model.forward(testInputs).toTensor();
+        auto res = model.forward(testInputs).toTensor();
         return res;
 
     }
@@ -62,15 +62,15 @@ torch::Tensor TorchModel::predict(const std::vector<torch::Tensor>& input)
     return result;
 }
 
-torch::Tensor TorchModel::predictTuple(const std::vector<torch::Tensor>& input)
+torch::Tensor TorchModel::PredictTuple(const std::vector<torch::Tensor>& input)
 {
-    torch::Tensor                   result = torch::empty({0}).to(this->device);
+    torch::Tensor                   result = torch::empty({0}).to(device);
     std::vector<torch::jit::IValue> testInputs;
-    for (auto& x : input) testInputs.push_back(x.to(this->device));
+    for (auto& x : input) testInputs.push_back(x.to(device));
 
     try
     {
-        auto res = this->model.forward(testInputs).toTuple()->elements()[0].toTensor();
+        auto res = model.forward(testInputs).toTuple()->elements()[0].toTensor();
         return res;
 
     }
@@ -84,7 +84,7 @@ torch::Tensor TorchModel::predictTuple(const std::vector<torch::Tensor>& input)
     return result;
 }
 
-void TorchModel::changeDevice(const torch::DeviceType& deviceSet, const int& index)
+void TorchModel::ChangeDevice(const torch::DeviceType& deviceSet, const int& index)
 {
     int deviceCount = torch::cuda::device_count();
     // MOVE model and all tensors created from now on to desired device
@@ -93,27 +93,27 @@ void TorchModel::changeDevice(const torch::DeviceType& deviceSet, const int& ind
         if (index < deviceCount)
         {
             torch::Device dev(deviceSet, index);
-            this->device = dev;
-            this->model.to(this->device);
+            device = dev;
+            model.to(device);
         }
         else
         {
             // Trying to use a device thats not there, set to next available GPU
             torch::Device dev(deviceSet, deviceCount - 1);
-            this->device = dev;
-            this->model.to(this->device);
+            device = dev;
+            model.to(device);
         }
     }
     else
     // Set to CPU if there are no CUDA devices
     {
         torch::Device dev = torch::kCPU;
-        this->device      = dev;
-        this->model.to(this->device);
+        device            = dev;
+        model.to(device);
     }
 }
 
-torch::Tensor TorchModel::convertToTensor(const cv::Mat& img, bool normalize, bool color)
+torch::Tensor TorchModel::ConvertToTensor(const cv::Mat& img, bool normalize, bool color)
 {
     cv::Mat c = img.clone();
     if (color) { cv::cvtColor(c, c, cv::COLOR_BGR2RGB); }
@@ -130,35 +130,35 @@ torch::Tensor TorchModel::convertToTensor(const cv::Mat& img, bool normalize, bo
     converted = converted.permute({2, 0, 1});
 
     // Add batch dimension
-    converted = converted.unsqueeze(0).to(this->device);
+    converted = converted.unsqueeze(0).to(device);
 
     return converted;
 }
 
-cv::Mat TorchModel::loadMat(std::filesystem::path const& file, bool grey, bool /* rgb */)
+cv::Mat TorchModel::LoadMat(std::filesystem::path const& file, bool grey, bool /* rgb */)
 {
     auto    readMode  = (grey) ? cv::IMREAD_GRAYSCALE : cv::IMREAD_COLOR;
     cv::Mat returnMat = cv::imread(file, readMode);
     return returnMat;
 }
 
-torch::Tensor TorchModel::convertListToTensor(std::list<cv::Mat>& imgs)
+torch::Tensor TorchModel::ConvertListToTensor(std::list<cv::Mat>& imgs)
 {
 
     // Initalize tensor with first image and pop it from list
     cv::Mat       first     = imgs.front();
-    torch::Tensor converted = this->convertToTensor(first);
+    torch::Tensor converted = ConvertToTensor(first);
     imgs.pop_front();
     // Concat all images to a single tensor
     for (auto& img : imgs)
     {
-        torch::Tensor next = this->convertToTensor(img);
+        torch::Tensor next = ConvertToTensor(img);
         converted          = torch::cat({next, converted});
     }
-    return converted.to(this->device);
+    return converted.to(device);
 }
 
-cv::Mat TorchModel::convertToMat(const torch::Tensor& output, bool isFloat, bool /* permute */, bool bgr, bool /* color */)
+cv::Mat TorchModel::ConvertToMat(const torch::Tensor& output, bool isFloat, bool /* permute */, bool bgr, bool /* color */)
 {
     torch::Tensor tensor = output.clone();
     tensor               = tensor.permute({1, 2, 0}).contiguous();
@@ -170,6 +170,6 @@ cv::Mat TorchModel::convertToMat(const torch::Tensor& output, bool isFloat, bool
     int     channels  = tensor.size(2);
     auto    dataType  = (channels == 3) ? CV_8UC3 : CV_8UC1;
     cv::Mat outputMat = cv::Mat(cv::Size(width, height), dataType, tensor.data_ptr());
-    if (bgr) cv::cvtColor(outputMat, outputMat, cv::COLOR_RGB2BGR);
+    if (bgr) { cv::cvtColor(outputMat, outputMat, cv::COLOR_RGB2BGR); }
     return outputMat.clone();
 }

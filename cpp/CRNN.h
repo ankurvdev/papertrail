@@ -18,12 +18,12 @@ class CRNNModel : public TorchModel
 
     public:
     CRNNModel();
-    std::vector<TextResult> recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& maxWidth);
-    torch::Tensor           preProcess(cv::Mat& det);
-    torch::Tensor           normalizePad(cv::Mat& processed, int minWidth);
-    std::string             greedyDecode(torch::Tensor& input, int size);
+    std::vector<TextResult> Recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& maxWidth);
+    torch::Tensor           PreProcess(cv::Mat& det);
+    torch::Tensor           NormalizePad(cv::Mat& processed, int maxWidth);
+    std::string             GreedyDecode(torch::Tensor& input, int size);
     // stores the last computed ratio (resize/rescale) from input image.
-    float             ratio;
-    std::vector<char> characters;
+    float             ratio{};
+    std::vector<char> characters{};
 };
 #endif
