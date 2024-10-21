@@ -25,7 +25,7 @@ template <typename T> struct ParallelWorker
     std::atomic<size_t> _completed{0};
     // moodycamel::BlockingConcurrentQueue<M3UItem> _results{1024};
     std::mutex               _mutex;
-    unsigned                 max_threads = DEFAULT_THREADS;
+    unsigned                 _max_threads = DEFAULT_THREADS;
     std::vector<std::thread> _threads;
     std::atomic<unsigned>    _active_threads{0};
     bool                     _stopRequested{false};
@@ -39,13 +39,13 @@ template <typename T> struct ParallelWorker
     CLASS_DELETE_COPY_AND_MOVE(ParallelWorker);
 
     [[nodiscard]] virtual std::string_view WorkName() const = 0;
-    virtual void             Process(T& item)  = 0;
+    virtual void                           Process(T& item) = 0;
 
     virtual std::string WorkDesc(T const& item) const { return fmt::format("{}", item); }
 
-    virtual void on_queue_finished() {}
-    virtual void OnQueueProgress(size_t /* total */, size_t /* completed */) {}
-    [[nodiscard]] bool         Working() const { return _active_threads > 0; }
+    virtual void       OnQueueFinished() {}
+    virtual void       OnQueueProgress(size_t /* total */, size_t /* completed */) {}
+    [[nodiscard]] bool Working() const { return _active_threads > 0; }
 
     auto LockScope() { return std::scoped_lock<std::mutex>(_mutex); }
     void AddItem(T&& item)
@@ -65,33 +65,30 @@ template <typename T> struct ParallelWorker
 
         _total_count = _items.size();
         _completed   = 0;
-        if (_total_count == 0) { return;
-}
-        if (max_threads == 0) { max_threads = std::thread::hardware_concurrency() + 1; }
-        if (max_threads == 1)
+        if (_total_count == 0) { return; }
+        if (_max_threads == 0) { _max_threads = std::thread::hardware_concurrency() + 1; }
+        if (_max_threads == 1)
         {
-            _worker();
+            Worker_();
             return;
         }
-        
-                    for (size_t i = _active_threads; i < max_threads; i++)
-            {
-                _active_threads++;
-                _threads.push_back(std::thread([this]() {
-                    _worker();
-                    _active_threads--;
-                    if (_active_threads == 0) { on_queue_finished(); }
-                }));
-            }
-       
+
+        for (size_t i = _active_threads; i < _max_threads; i++)
+        {
+            _active_threads++;
+            _threads.push_back(std::thread([this]() {
+                Worker_();
+                _active_threads--;
+                if (_active_threads == 0) { OnQueueFinished(); }
+            }));
+        }
     }
 
     void WaitForFinish()
     {
         for (auto& thread : _threads)
         {
-            if (thread.joinable()) { thread.join();
-}
+            if (thread.joinable()) { thread.join(); }
         }
     }
     void Stop()
@@ -105,7 +102,8 @@ template <typename T> struct ParallelWorker
         _stopRequested = false;
     }
 
-    void _worker()
+    private:
+    void Worker_()
     {
         while (!_stopRequested)
         {
@@ -117,8 +115,7 @@ template <typename T> struct ParallelWorker
                 _items.pop_back();
             }
 
-            if (verbose) { fmt::print("{}: {} : starting\n", WorkName(), WorkDesc(item));
-}
+            if (verbose) { fmt::print("{}: {} : starting\n", WorkName(), WorkDesc(item)); }
             try
             {
                 Process(item);
@@ -126,12 +123,10 @@ template <typename T> struct ParallelWorker
             {
                 auto message = fmt::format("{} : Item = {}\n\tError => {}\n", WorkName(), WorkDesc(item), e.what());
                 fmt::print(stderr, "{}", message);
-                if (debug) { throw;
-}
+                if (debug) { throw; }
             }
             auto completed = _completed.fetch_add(1, std::memory_order_relaxed);
-            if (verbose) { fmt::print("{}: {} : finished\n", WorkName(), WorkDesc(item));
-}
+            if (verbose) { fmt::print("{}: {} : finished\n", WorkName(), WorkDesc(item)); }
             OnQueueProgress(_total_count, completed);
         }
     }
