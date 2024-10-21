@@ -16,9 +16,6 @@ TorchModel::TorchModel()
     }
 }
 
-TorchModel::~TorchModel()
-{}
-
 bool TorchModel::loadModel(const std::filesystem::path& modelPath)
 {
     bool success = false;
@@ -138,7 +135,7 @@ torch::Tensor TorchModel::convertToTensor(const cv::Mat& img, bool normalize, bo
     return converted;
 }
 
-cv::Mat TorchModel::loadMat(std::filesystem::path const& file, bool grey, bool rgb)
+cv::Mat TorchModel::loadMat(std::filesystem::path const& file, bool grey, bool /* rgb */)
 {
     auto    readMode  = (grey) ? cv::IMREAD_GRAYSCALE : cv::IMREAD_COLOR;
     cv::Mat returnMat = cv::imread(file, readMode);
@@ -161,7 +158,7 @@ torch::Tensor TorchModel::convertListToTensor(std::list<cv::Mat>& imgs)
     return converted.to(this->device);
 }
 
-cv::Mat TorchModel::convertToMat(const torch::Tensor& output, bool isFloat, bool permute, bool bgr, bool color)
+cv::Mat TorchModel::convertToMat(const torch::Tensor& output, bool isFloat, bool /* permute */, bool bgr, bool /* color */)
 {
     torch::Tensor tensor = output.clone();
     tensor               = tensor.permute({1, 2, 0}).contiguous();

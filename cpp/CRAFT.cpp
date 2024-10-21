@@ -57,13 +57,13 @@ std::vector<BoundingBox> CraftModel::mergeBoundingBoxes(std::vector<BoundingBox>
         int       maxY           = 0;
         if (i < dets.size())
         {
-            float x          = dets[i].bottomRight.x;
-            float xPrime     = dets[i + 1].topLeft.x;
-            float ratio      = x / xPrime;
-            bool  isNegative = false;
-            if (x - xPrime < 0) isNegative = true;
-            float w = dets[i].bottomRight.x - dets[i].topLeft.x;
-            float h = dets[i].bottomRight.y - dets[i].topLeft.y;
+            float x      = dets[i].bottomRight.x;
+            float xPrime = dets[i + 1].topLeft.x;
+            float ratio  = x / xPrime;
+            // bool  isNegative = false;
+            // if (x - xPrime < 0) isNegative = true;
+            //  float w = dets[i].bottomRight.x - dets[i].topLeft.x;
+            //  float h = dets[i].bottomRight.y - dets[i].topLeft.y;
             if (width > 5 * height)
             {
                 // box is a line, skip merging
@@ -132,8 +132,11 @@ std::vector<BoundingBox> CraftModel::mergeBoundingBoxes(std::vector<BoundingBox>
     return merged;
 }
 
-std::vector<BoundingBox>
-CraftModel::getBoundingBoxes(const torch::Tensor& input, const torch::Tensor& output, float textThresh, float linkThresh, float lowText)
+std::vector<BoundingBox> CraftModel::getBoundingBoxes(const torch::Tensor& /* input */,
+                                                      const torch::Tensor& output,
+                                                      float /* textThresh */,
+                                                      float linkThresh,
+                                                      float lowText)
 {
     std::vector<BoundingBox> detBoxes;
     cv::Mat                  linkMap     = this->convertToMat(output.select(2, 0).unsqueeze(0).clone(), true, true, false, false).clone();
@@ -201,9 +204,9 @@ CraftModel::getBoundingBoxes(const torch::Tensor& input, const torch::Tensor& ou
         detection.bottomRight.y = (points[3].y * 2);
         if (detection.bottomRight.y < detection.topLeft.y) { std::cout << "ALIGNEMENT ISSUE" << std::endl; }
         // align diamond-shape
-        float w1        = cv::norm(box.row(0) - box.row(1));
-        float h1        = cv::norm(box.row(1) - box.row(2));
-        float box_ratio = std::max(w1, h1) / (std::min(w1, h1) + 1e-5);
+        // float w1 = cv::norm(box.row(0) - box.row(1));
+        // float h1 = cv::norm(box.row(1) - box.row(2));
+        // float box_ratio = std::max(w1, h1) / (std::min(w1, h1) + 1e-5);
         /*
         if (std::abs(1 - box_ratio) <= 0.1) {
             double l, r, t, b;
@@ -249,12 +252,12 @@ torch::Tensor CraftModel::preProcess(const cv::Mat& matInput)
 
 std::vector<BoundingBox> CraftModel::runDetector(torch::Tensor& input, bool merge)
 {
-    int                        height     = input.size(2);
-    int                        width      = input.size(3);
-    std::vector<torch::Tensor> detInput   = {input.clone()};
-    auto                       output     = this->predict(detInput).squeeze().detach().clone();
-    auto                       ss         = std::chrono::high_resolution_clock::now();
-    auto                       detections = this->getBoundingBoxes(input.clone(), output.clone());
+    int                        height   = input.size(2);
+    int                        width    = input.size(3);
+    std::vector<torch::Tensor> detInput = {input.clone()};
+    auto                       output   = this->predict(detInput).squeeze().detach().clone();
+    // auto                       ss         = std::chrono::high_resolution_clock::now();
+    auto detections = this->getBoundingBoxes(input.clone(), output.clone());
     // custom bounding box merging
     if (merge) detections = this->mergeBoundingBoxes(detections, .97, height, width);
     // auto ee = std::chrono::high_resolution_clock::now();

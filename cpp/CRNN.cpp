@@ -35,9 +35,9 @@ float resizeComputeRatio(cv::Mat& img, int modelHeight)
 }
 
 // Greedy decoding
-std::string CRNNModel::greedyDecode(torch::Tensor& input, int size)
+std::string CRNNModel::greedyDecode(torch::Tensor& input, int /* size */)
 {
-    int               length     = size;
+    // int               length     = size;
     std::vector<int>  ignoreList = {0};
     torch::Tensor     t          = input.slice(0, 0, input.size(0));
     auto              a          = torch::cat({torch::tensor({true}), ~(t.slice(0, 0, -1) == t.slice(0, 1).flatten())}, 0);
@@ -49,7 +49,7 @@ std::string CRNNModel::greedyDecode(torch::Tensor& input, int size)
     for (int i = 0; i < result.size(0); i++)
     {
         int index = result[i].item<int>();
-        if (index >= 0 && index < this->characters.size()) { extracted.push_back(this->characters[index]); }
+        if (index >= 0 && index < static_cast<int>(this->characters.size())) { extracted.push_back(this->characters[index]); }
     }
     // Join the extracted characters into a single string
     std::string text(extracted.begin(), extracted.end());
@@ -61,23 +61,23 @@ std::string CRNNModel::greedyDecode(torch::Tensor& input, int size)
 torch::Tensor CRNNModel::preProcess(cv::Mat& det)
 {
     // Default model height used in easyOCR
-    float  ratio = resizeComputeRatio(det, 64);
-    double alpha = 1.28;
-    double beta  = 0;
-    // cv::equalizeHist(det, det);
-    // det.convertTo(det, -1, alpha, beta);
+    // float ratio = resizeComputeRatio(det, 64);
+    // double alpha = 1.28;
+    // double beta  = 0;
+    //  cv::equalizeHist(det, det);
+    //  det.convertTo(det, -1, alpha, beta);
 
     // at least 128 in length
     auto processedTensor = this->normalizePad(det, 256);
     return processedTensor;
 }
 
-std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& maxWidth)
+std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& /* maxWidth */)
 {
     // returns max width for padding and resize
     std::vector<torch::Tensor> processed;
-    float                      maxRatio = 0;
-    std::vector<TextResult>    results;
+    // float                      maxRatio = 0;
+    std::vector<TextResult> results;
     for (auto& x : dets)
     {
         TextResult res;
@@ -87,12 +87,12 @@ std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv:
         torch::Tensor              processedTensor = this->preProcess(det);
         std::vector<torch::Tensor> input{processedTensor.unsqueeze(0)};
 
-        auto          ss     = std::chrono::high_resolution_clock::now();
+        // auto          ss     = std::chrono::high_resolution_clock::now();
         torch::Tensor output = this->predict(input);
-        auto          ee     = std::chrono::high_resolution_clock::now();
-        auto          difff  = ee - ss;
-        // std::cout << "TOTAL INFERENCE RECORNGITON TIME " << std::chrono::duration <double, std::milli>(difff).count() << " ms" <<
-        // std::endl;
+        // auto          ee     = std::chrono::high_resolution_clock::now();
+        //  auto          difff  = ee - ss;
+        //  std::cout << "TOTAL INFERENCE RECORNGITON TIME " << std::chrono::duration <double, std::milli>(difff).count() << " ms" <<
+        //  std::endl;
 
         // post process and decode
         auto          confidence = torch::softmax(output, 2);
@@ -109,7 +109,7 @@ std::vector<TextResult> CRNNModel::recognize(std::vector<BoundingBox>& dets, cv:
         processed.push_back(processedTensor);
     }
     // 64 was model height used in easyOCR
-    float maxW = float(ratio * 64);
+    // float maxW = float(ratio * 64);
     return results;
 }
 
@@ -126,6 +126,6 @@ torch::Tensor CRNNModel::normalizePad(cv::Mat& processed, int maxWidth)
         // cv::imwrite("Padded.jpg", padded);
         converted = pad.clone();
     }
-    int width = converted.size(2);
+    // int width = converted.size(2);
     return converted;
 }

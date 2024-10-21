@@ -12,7 +12,7 @@ class TorchModel
 {
     public:
     TorchModel();
-    ~TorchModel();
+    ~TorchModel() = default;
     bool          loadModel(const std::filesystem::path& modelPath);
     torch::Tensor predict(const std::vector<torch::Tensor>& input);
     void          changeDevice(const torch::DeviceType& deviceSet, const int& index);
