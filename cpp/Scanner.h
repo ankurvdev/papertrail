@@ -18,7 +18,7 @@ template <> struct fmt::formatter<std::shared_ptr<cli::Item>> : fmt::formatter<s
 struct Scanner : ParallelWorker<std::filesystem::path>
 {
     Scanner(cli::SearchArgs const& args);
-    std::string_view work_name() const override { return "ocr-scan"; }
+    std::string_view WorkName() const override { return "ocr-scan"; }
 
     /*     struct MissingM3UHeader : public std::runtime_error
         {
@@ -31,17 +31,17 @@ struct Scanner : ParallelWorker<std::filesystem::path>
     {
         for (const auto& entry : std::filesystem::directory_iterator(dirpath))
         {
-            if (entry.is_regular_file() && entry.path().extension() == ".m3u") { add_item(std::filesystem::path{entry.path()}); }
+            if (entry.is_regular_file() && entry.path().extension() == ".m3u") { AddItem(std::filesystem::path{entry.path()}); }
         }
     }
 
-    virtual bool filter(cli::Item& /* item */) { return true; }
+    virtual bool Filter(cli::Item& /* item */) { return true; }
 
     Scanner()                   = default;
     virtual ~Scanner() override = default;
     CLASS_DELETE_COPY_AND_MOVE(Scanner);
 
-    virtual void process(std::filesystem::path& fpath) override;
+    virtual void Process(std::filesystem::path& fpath) override;
 
     std::filesystem::path _workDir;
 };

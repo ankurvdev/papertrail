@@ -12,11 +12,11 @@ using namespace torch::indexing;
 
 Scanner::Scanner(cli::SearchArgs const& args) : _workDir(args.work_dir.str())
 {
-    for (auto const& scanf : args.file) { add_item(std::filesystem::path{scanf.str()}); }
+    for (auto const& scanf : args.file) { AddItem(std::filesystem::path{scanf.str()}); }
     for (auto const& scand : args.scan) { ScanDirectory(std::filesystem::path{scand.str()}); }
 }
 
-void Scanner::process(std::filesystem::path& fpath)
+void Scanner::Process(std::filesystem::path& fpath)
 {
     torch::NoGradGuard noGradGuard;
     c10::InferenceMode guard;
@@ -96,8 +96,8 @@ try
         return parseResult.helpRequested ? 0 : -1;
     }
     Scanner session(parseResult.obj);
-    session.start();
-    session.wait_for_finish();
+    session.Start();
+    session.WaitForFinish();
     return 0;
 } catch (std::exception const& ex)
 {
