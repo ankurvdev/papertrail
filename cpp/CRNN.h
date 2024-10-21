@@ -22,8 +22,10 @@ class CRNNModel : public TorchModel
     torch::Tensor           PreProcess(cv::Mat& det);
     torch::Tensor           NormalizePad(cv::Mat& processed, int maxWidth);
     std::string             GreedyDecode(torch::Tensor& input, int size);
+
+    private:
     // stores the last computed ratio (resize/rescale) from input image.
-    float             ratio{};
-    std::vector<char> characters{};
+    float             _ratio{};
+    std::vector<char> _characters{};
 };
 #endif

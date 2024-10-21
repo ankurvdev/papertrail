@@ -17,26 +17,6 @@ struct BoundingBox
     cv::Point topLeft;
     cv::Point bottomRight;
 };
-struct boxSorter
-{
-    bool operator()(const BoundingBox& a, const BoundingBox& b)
-    {
-        // Check if the boxes are on the same row
-        if (std::abs(a.bottomRight.y - b.bottomRight.y) < 7) { return a.bottomRight.x < b.bottomRight.x; }
-        // If the boxes are not on the same row, sort by their y-coordinate
-        else { return a.bottomRight.y < b.bottomRight.y; }
-    }
-};
-
-struct pointSorter
-{
-    bool operator()(const cv::Point& a, const cv::Point& b)
-    {
-        int sumA = a.x + a.y;
-        int sumB = b.x + b.y;
-        return sumA < sumB;
-    }
-};
 
 class CraftModel : public TorchModel
 {

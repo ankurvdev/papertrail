@@ -14,9 +14,9 @@ CRNNModel::CRNNModel()
     std::string line;
     std::getline(file, line);
     // add blank token
-    characters.push_back(' ');
+    _characters.push_back(' ');
     // Convert string to vector of characters
-    for (char c : line) { characters.push_back(c); }
+    for (char c : line) { _characters.push_back(c); }
 
     file.close();
 }
@@ -49,7 +49,7 @@ std::string CRNNModel::GreedyDecode(torch::Tensor& input, int /* size */)
     for (int i = 0; i < result.size(0); i++)
     {
         int index = result[i].item<int>();
-        if (index >= 0 && index < static_cast<int>(characters.size())) { extracted.push_back(characters[index]); }
+        if (index >= 0 && index < static_cast<int>(_characters.size())) { extracted.push_back(_characters[index]); }
     }
     // Join the extracted characters into a single string
     std::string text(extracted.begin(), extracted.end());
@@ -88,7 +88,7 @@ std::vector<TextResult> CRNNModel::Recognize(std::vector<BoundingBox>& dets, cv:
         std::vector<torch::Tensor> input{processedTensor.unsqueeze(0)};
 
         // auto          ss     = std::chrono::high_resolution_clock::now();
-        torch::Tensor output = Predict(input);
+        torch::Tensor output = TorchModel::Predict(input);
         // auto          ee     = std::chrono::high_resolution_clock::now();
         //  auto          difff  = ee - ss;
         //  std::cout << "TOTAL INFERENCE RECORNGITON TIME " << std::chrono::duration <double, std::milli>(difff).count() << " ms" <<

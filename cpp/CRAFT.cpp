@@ -1,9 +1,9 @@
 #include "CRAFT.h"
 #include "TorchModel.h"
 
-#include <cmath>
-
 #include <algorithm>
+#include <cmath>
+#include <opencv2/core/types.hpp>
 
 using namespace torch::indexing;
 HeatMapRatio CraftModel::ResizeAspect(cv::Mat& img)
@@ -13,16 +13,16 @@ HeatMapRatio CraftModel::ResizeAspect(cv::Mat& img)
     {
         cv::Mat processed;
         // int       channels   = img.channels();
-        float     height     = img.rows;
-        float     width      = img.cols;
+        auto      height     = static_cast<float>(img.rows);
+        auto      width      = static_cast<float>(img.cols);
         float     targetSize = std::max(height, width);
         const int canvasSize = 2560;
         int       targetH    = 0;
         int       targetW    = 0;
-        if (targetSize > canvasSize) { targetSize = canvasSize; }
-        float ratio = targetSize / std::max(height, width);
-        targetH     = int(height * ratio);
-        targetW     = int(width * ratio);
+        targetSize           = std::min<float>(targetSize, canvasSize);
+        float ratio          = targetSize / std::max(height, width);
+        targetH              = int(height * ratio);
+        targetW              = int(width * ratio);
         cv::resize(img, img, cv::Size(targetW, targetH));
 
         int h32 = targetH;
@@ -39,21 +39,42 @@ HeatMapRatio CraftModel::ResizeAspect(cv::Mat& img)
         output.ratio         = ratio;
         output.heatMapSize   = heatMapSize;
         output.img           = resized;
-        ratio                = ratio;
     } catch (std::exception& e)
     {
-        std::cout << e.what() << std::endl;
+        std::cout << e.what() << '\n';
     }
     return output;
 }
 
-static std::vector<BoundingBox> MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, int height, int width)
+struct BoxSorter
+{
+    bool operator()(const BoundingBox& a, const BoundingBox& b)
+    {
+        // Check if the boxes are on the same row
+        if (std::abs(a.bottomRight.y - b.bottomRight.y) < 7) { return a.bottomRight.x < b.bottomRight.x; }
+        // If the boxes are not on the same row, sort by their y-coordinate
+        return a.bottomRight.y < b.bottomRight.y;
+    }
+};
+
+struct PointSorter
+{
+    bool operator()(const cv::Point& a, const cv::Point& b)
+    {
+        int sumA = a.x + a.y;
+        int sumB = b.x + b.y;
+        return sumA < sumB;
+    }
+};
+
+static std::vector<BoundingBox>
+MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, cv::Point::value_type height, cv::Point::value_type width)
 {
     // represents how much we change the top left Y
-    std::sort(dets.begin(), dets.end(), boxSorter());
+    std::ranges::sort(dets, BoxSorter());
     bool                     merge = false;
     std::vector<BoundingBox> merged;
-    int                      newTopLeft = 0;
+    size_t                   newTopLeft = 0;
     bool                     firstRun   = true;
     for (size_t i = 0; i < dets.size(); i++)
     {
@@ -62,8 +83,8 @@ static std::vector<BoundingBox> MergeBoundingBoxes(std::vector<BoundingBox>& det
         int       maxY           = 0;
         if (i < dets.size())
         {
-            float x      = dets[i].bottomRight.x;
-            float xPrime = dets[i + 1].topLeft.x;
+            auto  x      = static_cast<float>(dets[i].bottomRight.x);
+            auto  xPrime = static_cast<float>(dets[i + 1].topLeft.x);
             float ratio  = x / xPrime;
             // bool  isNegative = false;
             // if (x - xPrime < 0) isNegative = true;
@@ -76,7 +97,7 @@ static std::vector<BoundingBox> MergeBoundingBoxes(std::vector<BoundingBox>& det
                 continue;
             }
             // merge box, store point
-            if (ratio > distanceThresh && ratio < 1.4 && std::abs(dets[i].bottomRight.y - dets[i + 1].bottomRight.y) < 20)
+            if (ratio > distanceThresh && ratio < 1.4f && std::abs(dets[i].bottomRight.y - dets[i + 1].bottomRight.y) < 20)
             {
                 newBottomRight = dets[i + 1].bottomRight;
                 if (dets[i + 1].topLeft.y < dets[i].topLeft.y)
@@ -107,8 +128,8 @@ static std::vector<BoundingBox> MergeBoundingBoxes(std::vector<BoundingBox>& det
                 newBox.topLeft = dets[newTopLeft].topLeft;
                 newBox.topLeft.y -= minY;
                 // margin
-                newBox.topLeft.y *= .998;
-                newBox.topLeft.x *= .998;
+                newBox.topLeft.y *= .998f;
+                newBox.topLeft.x *= .998f;
                 newBox.topLeft.y = std::max(newBox.topLeft.y, 0);
 
                 newBox.topLeft.x = std::max(newBox.topLeft.x, 0);
@@ -118,8 +139,8 @@ static std::vector<BoundingBox> MergeBoundingBoxes(std::vector<BoundingBox>& det
                 newBox.bottomRight = newBottomRight;
                 newBox.bottomRight.y += maxY;
                 // margin
-                newBox.bottomRight.y *= 1.003;
-                newBox.bottomRight.x *= 1.003;
+                newBox.bottomRight.y *= 1.003f;
+                newBox.bottomRight.x *= 1.003f;
 
                 if (newBox.bottomRight.y > height) { newBox.bottomRight.y = height - 1; }
 
@@ -185,10 +206,10 @@ static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input *
         int sy    = y - niter;
         int ey    = y + h + niter + 1;
         // boundary check
-        if (sx < 0) { sx = 0; }
-        if (sy < 0) { sy = 0; }
-        if (ex >= c) { ex = c; }
-        if (ey >= r) { ey = r; }
+        sx             = std::max(sx, 0);
+        sy             = std::max(sy, 0);
+        ex             = std::min(ex, c);
+        ey             = std::min(ey, r);
         cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1 + niter, 1 + niter));
         cv::dilate(segMap(cv::Range(sy, ey), cv::Range(sx, ex)), segMap(cv::Range(sy, ey), cv::Range(sx, ex)), kernel);
         // make box
@@ -209,7 +230,7 @@ static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input *
             cv::Point point(rowVal, colVal);
             points.push_back(point);
         }
-        std::sort(points.begin(), points.end(), pointSorter());
+        std::ranges::sort(points, PointSorter());
         detection.topLeft.x     = (points[0].x * 2);
         detection.topLeft.y     = (points[0].y * 2);
         detection.bottomRight.x = (points[3].x * 2);
@@ -264,10 +285,10 @@ torch::Tensor CraftModel::PreProcess(const cv::Mat& matInput)
 
 std::vector<BoundingBox> CraftModel::RunDetector(torch::Tensor& input, bool merge)
 {
-    int                        height   = input.size(2);
-    int                        width    = input.size(3);
+    auto                       height   = static_cast<cv::Point::value_type>(input.size(2));
+    auto                       width    = static_cast<cv::Point::value_type>(input.size(3));
     std::vector<torch::Tensor> detInput = {input.clone()};
-    auto                       output   = Predict(detInput).squeeze().detach().clone();
+    auto                       output   = TorchModel::Predict(detInput).squeeze().detach().clone();
     // auto                       ss         = std::chrono::high_resolution_clock::now();
     auto detections = GetBoundingBoxes(input.clone(), output.clone());
     // custom bounding box merging
