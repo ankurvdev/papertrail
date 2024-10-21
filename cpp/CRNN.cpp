@@ -1,15 +1,18 @@
 #include "CRNN.h"
+
 #include <fstream>
 #include <iostream>
 #include <tuple>
+
 using namespace torch::indexing;
+// NOLINTBEGIN(readability-magic-numbers)
 
 CRNNModel::CRNNModel()
 {
     // eventually read from a config!
     std::string   filename = "english_g2_characters.txt";
     std::ifstream file(filename);
-    if (!file.is_open()) { std::cerr << "Error: Unable to open file " << filename << std::endl; }
+    if (!file.is_open()) { std::cerr << "Error: Unable to open file " << filename << '\n'; }
 
     std::string line;
     std::getline(file, line);
@@ -35,7 +38,7 @@ CRNNModel::CRNNModel()
 }
  */
 // Greedy decoding
-std::string CRNNModel::GreedyDecode(torch::Tensor& input, int /* size */)
+std::string CRNNModel::GreedyDecode(torch::Tensor& input)    // NOLINT(readability-convert-member-functions-to-static)
 {
     // int               length     = size;
     std::vector<int>  ignoreList = {0};
@@ -49,7 +52,7 @@ std::string CRNNModel::GreedyDecode(torch::Tensor& input, int /* size */)
     for (int i = 0; i < result.size(0); i++)
     {
         int index = result[i].item<int>();
-        if (index >= 0 && index < static_cast<int>(_characters.size())) { extracted.push_back(_characters[index]); }
+        if (index >= 0 && index < static_cast<int>(_characters.size())) { extracted.push_back(_characters[static_cast<size_t>(index)]); }
     }
     // Join the extracted characters into a single string
     std::string text(extracted.begin(), extracted.end());
@@ -72,7 +75,9 @@ torch::Tensor CRNNModel::PreProcess(cv::Mat& det)
     return processedTensor;
 }
 
-std::vector<TextResult> CRNNModel::Recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& /* maxWidth */)
+std::vector<TextResult> CRNNModel::Recognize(std::vector<BoundingBox>& dets,    // NOLINT(readability-convert-member-functions-to-static)
+                                             cv::Mat&                  img,
+                                             int& /* maxWidth */)
 {
     // returns max width for padding and resize
     std::vector<torch::Tensor> processed;
@@ -82,7 +87,7 @@ std::vector<TextResult> CRNNModel::Recognize(std::vector<BoundingBox>& dets, cv:
     {
         TextResult res;
         cv::Mat    det = img(cv::Rect(x.topLeft.x, x.topLeft.y, (x.bottomRight.x - x.topLeft.x), (x.bottomRight.y - x.topLeft.y))).clone();
-        if (det.rows < 5) continue;
+        if (det.rows < 5) { continue; }
 
         torch::Tensor              processedTensor = PreProcess(det);
         std::vector<torch::Tensor> input{processedTensor.unsqueeze(0)};
@@ -101,7 +106,7 @@ std::vector<TextResult> CRNNModel::Recognize(std::vector<BoundingBox>& dets, cv:
         torch::Tensor predIndex;
         std::tie(std::ignore, predIndex) = prob.max(2);
         predIndex                        = predIndex.view({-1});
-        std::string text                 = GreedyDecode(predIndex, predIndex.size(0));
+        std::string text                 = GreedyDecode(predIndex);
         res.text                         = text;
         res.confidence                   = *prob.data_ptr<float>();
         res.coords                       = x;
@@ -129,3 +134,4 @@ torch::Tensor CRNNModel::NormalizePad(cv::Mat& processed, int maxWidth)
     // int width = converted.size(2);
     return converted;
 }
+// NOLINTEND(readability-magic-numbers)

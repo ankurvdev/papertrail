@@ -1,7 +1,8 @@
-#ifndef TORCHMODEL_H
-#define TORCHMODEL_H
+#pragma once
+
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+
 #include <opencv2/opencv.hpp>
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -13,7 +14,7 @@ class TorchModel
     public:
     TorchModel();
     ~TorchModel() = default;
-    bool          LoadModel(const std::filesystem::path& modelPath);
+    bool          LoadModel(const std::string& modelPath);
     torch::Tensor Predict(const std::vector<torch::Tensor>& input);
     // void           ChangeDevice(const torch::DeviceType& deviceSet, const size_t& index);
     torch::Tensor  ConvertToTensor(const cv::Mat& img, bool normalize = false, bool color = true);
@@ -27,4 +28,3 @@ class TorchModel
     // Default device is CUDA, if avail
     torch::Device _device = torch::kCUDA;
 };
-#endif

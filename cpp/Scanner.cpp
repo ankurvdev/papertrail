@@ -2,11 +2,16 @@
 
 #include "CRAFT.h"
 #include "CRNN.h"
-#include "TorchModel.h"
 
+#include <EmbeddedResource.h>
 #include <torch/torch.h>
 
 #include <filesystem>
+
+// NOLINTBEGIN(readability-magic-numbers)
+
+extern DECLARE_RESOURCE(models, CRAFT_detector_pt);
+extern DECLARE_RESOURCE(models, traced_recog_pt);
 
 using namespace torch::indexing;
 
@@ -27,17 +32,17 @@ void Scanner::Process(std::filesystem::path& fpath)
     cv::setNumThreads(4);
     torch::set_num_threads(4);
 
-    std::string det = "CRAFT-detector.pt";
-    std::string rec = "traced-recog.pt";
+    std::string det = LOAD_RESOURCE(models, CRAFT_detector_pt).data;
+    std::string rec = LOAD_RESOURCE(models, traced_recog_pt).data;
 
     auto startModel = std::chrono::steady_clock::now();
     // Always check the model was loaded successully
-    auto checkRec = recognition.LoadModel(rec.c_str());
-    auto checkDet = detection.LoadModel(det.c_str());
+    auto checkRec = recognition.LoadModel(rec);
+    auto checkDet = detection.LoadModel(det);
     auto endModel = std::chrono::steady_clock::now();
 
     auto diff = endModel - startModel;
-    std::cout << "MODEL TIME " << std::chrono::duration<double, std::milli>(diff).count() << " ms" << std::endl;
+    std::cout << "MODEL TIME " << std::chrono::duration<double, std::milli>(diff).count() << " ms" << '\n';
 
     // CHECK IF BOTH MODEL LOADED SUCESSFULLY
     if (checkRec && checkDet)
@@ -74,13 +79,13 @@ void Scanner::Process(std::filesystem::path& fpath)
             }
             for (auto& result : results)
             {
-                std::cout << "LOCATION: " << result.coords.topLeft << " " << result.coords.bottomRight << std::endl;
-                std::cout << "TEXT: " << result.text << std::endl;
-                std::cout << "CONFIDENCE " << result.confidence << std::endl;
-                std::cout << "################################################" << std::endl;
+                std::cout << "LOCATION: " << result.coords.topLeft << " " << result.coords.bottomRight << '\n';
+                std::cout << "TEXT: " << result.text << '\n';
+                std::cout << "CONFIDENCE " << result.confidence << '\n';
+                std::cout << "################################################" << '\n';
             }
             cv::imwrite("../output-heatmap.jpg", clone);
-            std::cout << "TOTAL INFERENCE TIME " << std::chrono::duration<double, std::milli>(difff).count() << " ms" << std::endl;
+            std::cout << "TOTAL INFERENCE TIME " << std::chrono::duration<double, std::milli>(difff).count() << " ms" << '\n';
         }
     }
 }
@@ -89,7 +94,8 @@ int main(int argc, char const* const argv[])
 try
 {
 
-    auto parseResult = Stencil::CLI::Parse<cli::SearchArgs>(argc - 1, &argv[1]);
+    auto parseResult
+        = Stencil::CLI::Parse<cli::SearchArgs>(argc - 1, &argv[1]);    // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     if (parseResult.helpRequested || !parseResult.success)
     {
         fmt::print(stderr, "{}\n", fmt::join(Stencil::CLI::GenerateHelp(parseResult.obj), "\n"));
@@ -104,3 +110,4 @@ try
     fmt::print("Exception: {}\n", ex.what());
     return -1;
 }
+// NOLINTEND(readability-magic-numbers)

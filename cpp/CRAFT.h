@@ -1,7 +1,6 @@
-#ifndef CRAFT_H
-#define CRAFT_H
+#pragma once
 #include "TorchModel.h"
-#include "string"
+
 #include <opencv2/opencv.hpp>
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -29,4 +28,3 @@ class CraftModel : public TorchModel
     // stores the last computed ratio (resize/rescale) from input image.
     float ratio;
 };
-#endif

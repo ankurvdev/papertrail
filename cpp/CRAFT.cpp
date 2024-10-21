@@ -1,9 +1,10 @@
 #include "CRAFT.h"
-#include "TorchModel.h"
 
 #include <algorithm>
 #include <cmath>
-#include <opencv2/core/types.hpp>
+#include <limits>
+
+// NOLINTBEGIN(readability-magic-numbers)
 
 using namespace torch::indexing;
 HeatMapRatio CraftModel::ResizeAspect(cv::Mat& img)
@@ -100,14 +101,8 @@ MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, cv::Poi
             if (ratio > distanceThresh && ratio < 1.4f && std::abs(dets[i].bottomRight.y - dets[i + 1].bottomRight.y) < 20)
             {
                 newBottomRight = dets[i + 1].bottomRight;
-                if (dets[i + 1].topLeft.y < dets[i].topLeft.y)
-                {
-                    if (minY > dets[i + 1].topLeft.y) { minY = dets[i + 1].topLeft.y; }
-                }
-                else
-                {
-                    if (dets[i + 1].bottomRight.y > maxY) { maxY = dets[i + 1].bottomRight.y; }
-                }
+                if (dets[i + 1].topLeft.y < dets[i].topLeft.y) { minY = std::min(minY, dets[i + 1].topLeft.y); }
+                else { maxY = std::max(dets[i + 1].bottomRight.y, maxY); }
                 merge = true;
             }
             else
@@ -128,8 +123,8 @@ MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, cv::Poi
                 newBox.topLeft = dets[newTopLeft].topLeft;
                 newBox.topLeft.y -= minY;
                 // margin
-                newBox.topLeft.y *= .998f;
-                newBox.topLeft.x *= .998f;
+                newBox.topLeft.y -= (newBox.topLeft.y / 64);    // NOLINT(bugprone-narrowing-conversions)
+                newBox.topLeft.x -= (newBox.topLeft.x / 64);    // NOLINT(bugprone-narrowing-conversions)
                 newBox.topLeft.y = std::max(newBox.topLeft.y, 0);
 
                 newBox.topLeft.x = std::max(newBox.topLeft.x, 0);
@@ -139,8 +134,8 @@ MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, cv::Poi
                 newBox.bottomRight = newBottomRight;
                 newBox.bottomRight.y += maxY;
                 // margin
-                newBox.bottomRight.y *= 1.003f;
-                newBox.bottomRight.x *= 1.003f;
+                newBox.bottomRight.y += (newBox.bottomRight.y / 32);    // NOLINT(bugprone-narrowing-conversions)
+                newBox.bottomRight.x += (newBox.bottomRight.x / 32);    // NOLINT(bugprone-narrowing-conversions)
 
                 if (newBox.bottomRight.y > height) { newBox.bottomRight.y = height - 1; }
 
@@ -158,10 +153,10 @@ MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, cv::Poi
     return merged;
 }
 static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input */,
-                                                 const torch::Tensor&   output,
-                                                 [[maybe_unused]] float textThresh = .7,
-                                                 float                  linkThresh = .4,
-                                                 float                  lowText    = .4)
+                                                 const torch::Tensor&    output,
+                                                 [[maybe_unused]] double textThresh = .7,
+                                                 double                  linkThresh = .4,
+                                                 double                  lowText    = .4)
 {
     std::vector<BoundingBox> detBoxes;
     cv::Mat                  linkMap = TorchModel::ConvertToMat(output.select(2, 0).unsqueeze(0).clone(), true, true, false, false).clone();
@@ -171,8 +166,8 @@ static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input *
     int                      c           = linkMap.cols;
     cv::Mat                  linkScore;
     cv::Mat                  textScore;
-    cv::threshold(linkMap, linkScore, (linkThresh * 255), 255, 0);
-    cv::threshold(textMap, textScore, (lowText * 255), 255, 0);
+    cv::threshold(linkMap, linkScore, (linkThresh * 255.), 255, 0);
+    cv::threshold(textMap, textScore, (lowText * 255.), 255, 0);
     cv::Mat outputScore = linkScore.clone() + textScore.clone();
     cv::min(cv::max(outputScore, 0), 255, outputScore);
     outputScore.convertTo(outputScore, CV_8UC3);
@@ -187,8 +182,8 @@ static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input *
         if (area < 10) { continue; }
         cv::Mat   segMap = cv::Mat::zeros(textMap.size(), CV_8UC1);
         cv::Mat   mask   = (labels == i);
-        double    minVal = NAN;
-        double    maxVal = NAN;
+        double    minVal = std::numeric_limits<double>::quiet_NaN();
+        double    maxVal = std::numeric_limits<double>::quiet_NaN();
         cv::Point minLoc;
         cv::Point maxLoc;
         cv::minMaxLoc(textMap, &minVal, &maxVal, &minLoc, &maxLoc, mask);
@@ -215,19 +210,19 @@ static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input *
         // make box
         cv::Mat nonZeroCoords;
         cv::findNonZero(segMap, nonZeroCoords);
-        cv::Mat         npContours = nonZeroCoords.reshape(2, nonZeroCoords.total()).t();
+        cv::Mat         npContours = nonZeroCoords.reshape(2, static_cast<int>(nonZeroCoords.total())).t();
         cv::Mat         boxMat;
         cv::RotatedRect rectangle = cv::minAreaRect(npContours);
         cv::boxPoints(rectangle, boxMat);
         cv::Mat                box = boxMat;
         BoundingBox            detection;
         std::vector<cv::Point> points;
-        for (int i = 0; i < 4; i++)
+        for (int k = 0; k < 4; k++)
         {
             float colVal = NAN;
-            float rowVal = box.at<float>(i, 0);
-            for (int j = 0; j < 1; j++) { colVal = box.at<float>(i, 1); }
-            cv::Point point(rowVal, colVal);
+            float rowVal = box.at<float>(k, 0);
+            for (int j = 0; j < 1; j++) { colVal = box.at<float>(k, 1); }
+            cv::Point point(static_cast<int>(rowVal), static_cast<int>(colVal));
             points.push_back(point);
         }
         std::ranges::sort(points, PointSorter());
@@ -235,7 +230,7 @@ static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input *
         detection.topLeft.y     = (points[0].y * 2);
         detection.bottomRight.x = (points[3].x * 2);
         detection.bottomRight.y = (points[3].y * 2);
-        if (detection.bottomRight.y < detection.topLeft.y) { std::cout << "ALIGNEMENT ISSUE" << std::endl; }
+        if (detection.bottomRight.y < detection.topLeft.y) { std::cout << "ALIGNEMENT ISSUE" << '\n'; }
         // align diamond-shape
         // float w1 = cv::norm(box.row(0) - box.row(1));
         // float h1 = cv::norm(box.row(1) - box.row(2));
@@ -283,7 +278,8 @@ torch::Tensor CraftModel::PreProcess(const cv::Mat& matInput)
     return input;
 }
 
-std::vector<BoundingBox> CraftModel::RunDetector(torch::Tensor& input, bool merge)
+std::vector<BoundingBox> CraftModel::RunDetector(torch::Tensor& input,    // NOLINT(readability-convert-member-functions-to-static)
+                                                 bool           merge)
 {
     auto                       height   = static_cast<cv::Point::value_type>(input.size(2));
     auto                       width    = static_cast<cv::Point::value_type>(input.size(3));
@@ -292,9 +288,10 @@ std::vector<BoundingBox> CraftModel::RunDetector(torch::Tensor& input, bool merg
     // auto                       ss         = std::chrono::high_resolution_clock::now();
     auto detections = GetBoundingBoxes(input.clone(), output.clone());
     // custom bounding box merging
-    if (merge) { detections = MergeBoundingBoxes(detections, .97, height, width); }
+    if (merge) { detections = MergeBoundingBoxes(detections, .97f, height, width); }
     // auto ee = std::chrono::high_resolution_clock::now();
     // auto difff = ee - ss;
     // std::cout << "TOTAL preprocessing TIME " << std::chrono::duration <double, std::milli>(difff).count() << " ms" << std::endl;
     return detections;
 }
+// NOLINTEND(readability-magic-numbers)

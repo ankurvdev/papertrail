@@ -1,6 +1,10 @@
 
 #include "TorchModel.h"
 
+#include <sstream>
+
+// NOLINTBEGIN(readability-magic-numbers)
+
 TorchModel::TorchModel()
 {
 
@@ -16,14 +20,14 @@ TorchModel::TorchModel()
     }
 }
 
-bool TorchModel::LoadModel(const std::filesystem::path& modelPath)
+bool TorchModel::LoadModel(const std::string& data)    // NOLINT(readability-convert-member-functions-to-static)
 {
     bool success = false;
     try
     {
-
+        std::istringstream iss(data);
         // auto startModel = chrono::steady_clock::now();
-        _model = torch::jit::load(modelPath.c_str());
+        _model = torch::jit::load(iss);
         _model.to(_device);
         // auto endModel = chrono::steady_clock::now();
         // auto diff = endModel - startModel;
@@ -43,8 +47,8 @@ torch::Tensor TorchModel::Predict(const std::vector<torch::Tensor>& input)
 {
     torch::Tensor                   result = torch::empty({0}).to(_device);
     std::vector<torch::jit::IValue> testInputs;
-    for (auto& x : input) testInputs.push_back(x.to(_device));
-
+    testInputs.reserve(input.size());
+    for (const auto& x : input) { testInputs.emplace_back(x.to(_device)); }
     try
     {
         auto res = _model.forward(testInputs).toTensor();
@@ -54,7 +58,7 @@ torch::Tensor TorchModel::Predict(const std::vector<torch::Tensor>& input)
 
     catch (std::exception& e)
     {
-        std::cout << e.what() << std::endl;
+        std::cout << e.what() << '\n';
     }
 
     // Clears growing cuda cache and frees memory if process is interupted.
@@ -66,7 +70,8 @@ torch::Tensor TorchModel::PredictTuple(const std::vector<torch::Tensor>& input)
 {
     torch::Tensor                   result = torch::empty({0}).to(_device);
     std::vector<torch::jit::IValue> testInputs;
-    for (auto& x : input) testInputs.push_back(x.to(_device));
+    testInputs.reserve(input.size());
+    for (auto const& x : input) { testInputs.emplace_back(x.to(_device)); }
 
     try
     {
@@ -77,7 +82,7 @@ torch::Tensor TorchModel::PredictTuple(const std::vector<torch::Tensor>& input)
 
     catch (std::exception& e)
     {
-        std::cout << e.what() << std::endl;
+        std::cout << e.what() << '\n';
     }
     // Clears growing cuda cache and frees memory if process is interupted.
     // c10::cuda::CUDACachingAllocator::emptyCache();
@@ -118,13 +123,13 @@ torch::Tensor TorchModel::ConvertToTensor(const cv::Mat& img, bool normalize, bo
     cv::Mat c = img.clone();
     if (color) { cv::cvtColor(c, c, cv::COLOR_BGR2RGB); }
 
-    float scale     = (normalize) ? 1.0 / 255.0 : 1.0;
-    int   channels  = c.channels();
-    auto  colorRead = (channels == 3) ? CV_32FC3 : CV_32FC1;
+    auto scale     = (normalize) ? 1.0 / 255.0 : 1.0;
+    int  channels  = c.channels();
+    auto colorRead = (channels == 3) ? CV_32FC3 : CV_32FC1;
     c.convertTo(c, colorRead, scale);
 
     torch::Tensor converted = torch::zeros({c.rows, c.cols, channels}, torch::kF32);
-    std::memcpy(converted.data_ptr(), c.data, sizeof(float) * converted.numel());
+    std::memcpy(converted.data_ptr(), c.data, sizeof(float) * static_cast<size_t>(converted.numel()));
 
     // add color dimension if it is greyscale 1
     converted = converted.permute({2, 0, 1});
@@ -165,11 +170,13 @@ cv::Mat TorchModel::ConvertToMat(const torch::Tensor& output, bool isFloat, bool
     // if float, image is range of 0 -> 1
     tensor            = (isFloat) ? tensor.mul(255).clamp(0, 255).to(torch::kU8) : tensor.to(torch::kU8);
     tensor            = tensor.to(torch::kCPU);
-    int64_t height    = tensor.size(0);
-    int64_t width     = tensor.size(1);
-    int     channels  = tensor.size(2);
+    int     height    = static_cast<int>(tensor.size(0));
+    int     width     = static_cast<int>(tensor.size(1));
+    int     channels  = static_cast<int>(tensor.size(2));
     auto    dataType  = (channels == 3) ? CV_8UC3 : CV_8UC1;
     cv::Mat outputMat = cv::Mat(cv::Size(width, height), dataType, tensor.data_ptr());
     if (bgr) { cv::cvtColor(outputMat, outputMat, cv::COLOR_RGB2BGR); }
     return outputMat.clone();
 }
+
+// NOLINTEND(readability-magic-numbers)
