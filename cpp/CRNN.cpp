@@ -7,21 +7,10 @@
 using namespace torch::indexing;
 // NOLINTBEGIN(readability-magic-numbers)
 
-CRNNModel::CRNNModel()
+CRNNModel::CRNNModel(std::string_view const& charactersstr)
 {
-    // eventually read from a config!
-    std::string   filename = "english_g2_characters.txt";
-    std::ifstream file(filename);
-    if (!file.is_open()) { std::cerr << "Error: Unable to open file " << filename << '\n'; }
-
-    std::string line;
-    std::getline(file, line);
-    // add blank token
     _characters.push_back(' ');
-    // Convert string to vector of characters
-    for (char c : line) { _characters.push_back(c); }
-
-    file.close();
+    for (auto ch : charactersstr) { _characters.push_back(ch); }
 }
 
 /* static float ResizeComputeRatio(cv::Mat& img, int modelHeight)

@@ -17,7 +17,7 @@ class CRNNModel : public TorchModel
 {
 
     public:
-    CRNNModel();
+    CRNNModel(std::string_view const& charactersstr);
     std::vector<TextResult> Recognize(std::vector<BoundingBox>& dets, cv::Mat& img, int& maxWidth);
     torch::Tensor           PreProcess(cv::Mat& det);
     torch::Tensor           NormalizePad(cv::Mat& processed, int maxWidth);

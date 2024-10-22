@@ -12,6 +12,7 @@
 
 extern DECLARE_RESOURCE(models, CRAFT_detector_pt);
 extern DECLARE_RESOURCE(models, traced_recog_pt);
+extern DECLARE_RESOURCE(config, english_g2_characters_txt);
 
 using namespace torch::indexing;
 
@@ -22,10 +23,11 @@ Scanner::Scanner(cli::SearchArgs const& args) : _workDir(args.work_dir.str())
 }
 
 void Scanner::Process(std::filesystem::path& fpath)
+try
 {
     torch::NoGradGuard noGradGuard;
     c10::InferenceMode guard;
-    CRNNModel          recognition;
+    CRNNModel          recognition(LOAD_RESOURCE(config, english_g2_characters_txt).data);
     CraftModel         detection;
 
     // set to mimi Tesseract
@@ -62,14 +64,9 @@ void Scanner::Process(std::filesystem::path& fpath)
         {
 
             torch::Tensor input = detection.PreProcess(processed.img.clone());
-            auto          ss    = std::chrono::high_resolution_clock::now();
             // use custom algorithm for bounding box merging
-            std::vector<BoundingBox> dets     = detection.RunDetector(input, true);
-            int                      maxWidth = 0;
-            std::vector<TextResult>  results  = recognition.Recognize(dets, grey, maxWidth);
-            auto                     ee       = std::chrono::high_resolution_clock::now();
-            auto                     difff    = ee - ss;
-            int                      count    = 0;
+            std::vector<BoundingBox> dets  = detection.RunDetector(input, true);
+            int                      count = 0;
             for (auto x : dets)
             {
                 rectangle(clone, x.topLeft, x.bottomRight, cv::Scalar(0, 255, 0));
@@ -77,17 +74,24 @@ void Scanner::Process(std::filesystem::path& fpath)
                     clone, std::to_string(count), (x.bottomRight + x.topLeft) / 2, cv::FONT_HERSHEY_COMPLEX, .6, cv::Scalar(100, 0, 255));
                 count++;
             }
+            /*
+            std::vector<TextResult> results = recognition.Recognize(dets, grey, maxWidth);
+            auto                    ee      = std::chrono::high_resolution_clock::now();
+            auto                    difff   = ee - ss;
+
             for (auto& result : results)
             {
                 std::cout << "LOCATION: " << result.coords.topLeft << " " << result.coords.bottomRight << '\n';
                 std::cout << "TEXT: " << result.text << '\n';
                 std::cout << "CONFIDENCE " << result.confidence << '\n';
                 std::cout << "################################################" << '\n';
-            }
-            cv::imwrite("../output-heatmap.jpg", clone);
-            std::cout << "TOTAL INFERENCE TIME " << std::chrono::duration<double, std::milli>(difff).count() << " ms" << '\n';
+            }*/
+            cv::imwrite((fpath.parent_path() / "output-heatmap.jpg").c_str(), clone);
         }
     }
+} catch (std::exception const& ex)
+{
+    fmt::print("Exception: {}\n", ex.what());
 }
 
 int main(int argc, char const* const argv[])
