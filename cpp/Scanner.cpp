@@ -2,8 +2,10 @@
 
 #include "CRAFT.h"
 #include "CRNN.h"
+#include "TextDetector.h"
 
 #include <EmbeddedResource.h>
+#include <c10/core/DeviceType.h>
 #include <torch/torch.h>
 
 #include <filesystem>
@@ -25,6 +27,9 @@ Scanner::Scanner(cli::SearchArgs const& args) : _workDir(args.work_dir.str())
 void Scanner::Process(std::filesystem::path& fpath)
 try
 {
+    auto detector = TextDetector::Create(torch::kCPU);
+    detector->Run(fpath);
+
     torch::NoGradGuard noGradGuard;
     c10::InferenceMode guard;
     CRNNModel          recognition(LOAD_RESOURCE(config, english_g2_characters_txt).data);

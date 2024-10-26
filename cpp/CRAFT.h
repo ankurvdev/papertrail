@@ -1,21 +1,6 @@
 #pragma once
+#include "TextDetector.h"
 #include "TorchModel.h"
-
-#include <opencv2/opencv.hpp>
-#include <torch/script.h>
-#include <torch/torch.h>
-
-struct HeatMapRatio
-{
-    cv::Mat  img;
-    cv::Size heatMapSize;
-    float    ratio;
-};
-struct BoundingBox
-{
-    cv::Point topLeft;
-    cv::Point bottomRight;
-};
 
 class CraftModel : public TorchModel
 {
