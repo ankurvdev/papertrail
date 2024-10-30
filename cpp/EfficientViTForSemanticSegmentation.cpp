@@ -1,8 +1,11 @@
 #include "CommonMacros.h"
 #include "TextDetector.h"
 
+#include <opencv2/core/types.hpp>
 #include <opencv2/opencv.hpp>
 #include <torch/torch.h>
+
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +25,14 @@ static constexpr auto BlankThreshold   = 0.35f;    // Threshold for blank space 
 static constexpr int  MaxBatchSize        = 8;
 static constexpr auto ImagenetDefaultMean = std::array{0.485f, 0.456f, 0.406f};
 static constexpr auto ImagenetDefaultStd  = std::array{0.229f, 0.224f, 0.225f};
+
+template <> struct fmt::formatter<cv::Point2i> : fmt::formatter<std::string_view>
+{
+    template <typename FormatContext> auto format(cv::Point2i const& item, FormatContext& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "[{}, {}]", item.x, item.y);
+    }
+};
 
 [[maybe_unused]] static inline void WriteAsImage(torch::Tensor tensor3d, std::filesystem::path const& outf)
 {
@@ -134,71 +145,80 @@ template <typename TLeftIterator, typename TRightIterator>
 }
 
 static std::pair<float, float>
-get_dynamic_thresholds(const cv::Mat& linemap, float text_threshold, float low_text, float typical_top10_avg = 0.7f)
+GetDynamicThresholds(const cv::Mat& linemap, float textThreshold, float lowText, float typicalTop10Avg = 0.7f)
 {
     // Flatten the linemap
-    auto flat_map = std::vector<float>(linemap.begin<float>(), linemap.end<float>());
+    auto flatMap = std::vector<float>(linemap.begin<float>(), linemap.end<float>());
 
     // Calculate number of pixels in top 10%
-    unsigned top_10_count = static_cast<unsigned>(static_cast<float>(flat_map.size()) * 0.9f);
+    auto top10Count = static_cast<unsigned>(static_cast<float>(flatMap.size()) * 0.9f);
     // Sort the vector to find average intensity of the top 10%
-    std::nth_element(flat_map.begin(), flat_map.begin() + top_10_count, flat_map.end());
-    float avg_intensity
-        = std::accumulate(flat_map.begin() + top_10_count, flat_map.end(), 0.0f) / static_cast<float>(flat_map.size() - top_10_count);
+    std::nth_element(flatMap.begin(), flatMap.begin() + top10Count, flatMap.end());
+    float avgIntensity
+        = std::accumulate(flatMap.begin() + top10Count, flatMap.end(), 0.0f) / static_cast<float>(flatMap.size() - top10Count);
 
     // Calculate scaling factor
-    float scaling_factor = std::clamp(avg_intensity / typical_top10_avg, 0.0f, 1.0f);
-    scaling_factor       = std::sqrt(scaling_factor);    // Apply square root
+    float scalingFactor = std::clamp(avgIntensity / typicalTop10Avg, 0.0f, 1.0f);
+    scalingFactor       = std::sqrt(scalingFactor);    // Apply square root
 
     // Adjust thresholds
-    low_text       = std::clamp(low_text * scaling_factor, 0.1f, 0.6f);
-    text_threshold = std::clamp(text_threshold * scaling_factor, 0.15f, 0.8f);
+    lowText       = std::clamp(lowText * scalingFactor, 0.1f, 0.6f);
+    textThreshold = std::clamp(textThreshold * scalingFactor, 0.15f, 0.8f);
 
-    return {text_threshold, low_text};    // Return updated thresholds
+    return {textThreshold, lowText};    // Return updated thresholds
 }
 
 static cv::Mat TorchTensorToMat(const at::Tensor& tensor)
 {
     // Convert to numpy-like layout
     [[maybe_unused]] auto vec = TensorToVector<float, float>(tensor);
-    cv::Mat               mat_image(static_cast<int>(tensor.size(0)), static_cast<int>(tensor.size(1)), CV_32FC1, tensor.data_ptr<float>());
+    cv::Mat               matImage(static_cast<int>(tensor.size(0)), static_cast<int>(tensor.size(1)), CV_32FC1, tensor.data_ptr<float>());
 
-    return mat_image;
+    return matImage;
 }
+#define DEBUG_BOX_DETECTION "/home/ankurv/papertrail/testdata/test1/surya_cpp.preds.pt"
 
 static std::vector<PolygonBox>
-detect_boxes(const cv::Mat& linemap, cv::Size processor_size, cv::Size image_size, float text_threshold, float low_text)
+DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, float textThreshold, float lowText)
 {
 
 #if defined DEBUG_BOX_DETECTION
-    torch::Tensor bboxtensor;
-    torch::load(bboxtensor, stDEBUG_BOX_DETECTION /*"surya_cpp.preds.pt.bboxesf.pt"*/);
-    auto refbboxesf = TensorToVector<float, float>(bboxtensor);
+    torch::Tensor bboxftensor;
+    torch::Tensor bboxitensor;
+    torch::load(bboxftensor, DEBUG_BOX_DETECTION ".bboxesf.pt" /*"surya_cpp.preds.pt.bboxesf.pt"*/);
+    torch::load(bboxitensor, DEBUG_BOX_DETECTION ".bboxesi.pt" /*"surya_cpp.preds.pt.bboxesi.pt"*/);
+    auto refbboxesf = TensorToVector<float, float>(bboxftensor);
+    auto refbboxesi = TensorToVector<int64_t, int>(bboxitensor);
 #endif
 
     int imgH = linemap.rows;
     int imgW = linemap.cols;
 
     // Get dynamic thresholds (this function needs to be defined separately)
-    std::tie(text_threshold, low_text) = get_dynamic_thresholds(linemap, text_threshold, low_text);
+    std::tie(textThreshold, lowText) = GetDynamicThresholds(linemap, textThreshold, lowText);
 
-    cv::Mat               text_score_comb = (linemap > low_text);    // Convert to binary image
-    cv::Mat               labels, stats, centroids;
-    [[maybe_unused]] auto flat_map = std::vector<uint8_t>(text_score_comb.begin<uint8_t>(), text_score_comb.end<uint8_t>());
+    cv::Mat               textScoreComb = (linemap > lowText);    // Convert to binary image
+    cv::Mat               labels;
+    cv::Mat               stats;
+    cv::Mat               centroids;
+    [[maybe_unused]] auto flatMap = std::vector<uint8_t>(textScoreComb.begin<uint8_t>(), textScoreComb.end<uint8_t>());
 
     // Find connected components
-    cv::connectedComponentsWithStats(text_score_comb, labels, stats, centroids, 4);
-    int label_count = stats.rows;
+    cv::connectedComponentsWithStats(textScoreComb, labels, stats, centroids, 4);
+    int labelCount = stats.rows;
 
     std::vector<PolygonBox> det;
-    float                   max_confidence = 0.0f;
-    cv::Size2f              scalef{static_cast<float>(image_size.width) / static_cast<float>(processor_size.width),
-                      static_cast<float>(image_size.height) / static_cast<float>(processor_size.height)};
+    float                   maxConfidence = 0.0f;
+    cv::Size2f              scalef{static_cast<float>(imageSize.width) / static_cast<float>(processorSize.width),
+                      static_cast<float>(imageSize.height) / static_cast<float>(processorSize.height)};
 
-    for (int k = 1; k < label_count; ++k)
+    for (int k = 1; k < labelCount; ++k)
     {
         int size = stats.at<int>(k, cv::CC_STAT_AREA);
-        if (size < 10) continue;    // Size filtering
+        if (size < 10)
+        {
+            continue;    // Size filtering
+        }
 
         int x = stats.at<int>(k, cv::CC_STAT_LEFT);
         int y = stats.at<int>(k, cv::CC_STAT_TOP);
@@ -213,14 +233,17 @@ detect_boxes(const cv::Mat& linemap, cv::Size processor_size, cv::Size image_siz
         int ey     = std::min(imgH, y + h + niter + buffer);
 
         cv::Mat mask = (labels(cv::Rect(sx, sy, ex - sx, ey - sy)) == k);
-        cv::Mat selected_linemap;
-        linemap(cv::Rect(sx, sy, ex - sx, ey - sy)).copyTo(selected_linemap, mask);
+        cv::Mat selectedLinemap;
+        linemap(cv::Rect(sx, sy, ex - sx, ey - sy)).copyTo(selectedLinemap, mask);
 
-        double line_max_d;
-        cv::minMaxLoc(selected_linemap, nullptr, &line_max_d);
+        double lineMaxD = NAN;
+        cv::minMaxLoc(selectedLinemap, nullptr, &lineMaxD);
 
-        auto line_max = static_cast<float>(line_max_d);
-        if (line_max < text_threshold) continue;    // Thresholding
+        auto lineMax = static_cast<float>(lineMaxD);
+        if (lineMax < textThreshold)
+        {
+            continue;    // Thresholding
+        }
 
         cv::Mat segmap = mask.clone();
         int     ksize  = buffer + niter;
@@ -228,12 +251,12 @@ detect_boxes(const cv::Mat& linemap, cv::Size processor_size, cv::Size image_siz
         cv::dilate(segmap, segmap, kernel);
 
         std::vector<cv::Point2f> contours;
-        std::vector<cv::Point>   non_zero_points;
-        cv::findNonZero(segmap, non_zero_points);
+        std::vector<cv::Point>   nonZeroPoints;
+        cv::findNonZero(segmap, nonZeroPoints);
 
         // Step 3: Adjust indices and create contour points
-        contours.reserve(non_zero_points.size());
-        for (const auto& point : non_zero_points)
+        contours.reserve(nonZeroPoints.size());
+        for (const auto& point : nonZeroPoints)
         {
             contours.emplace_back(point.x + sx, point.y + sy);    // Adjust coordinates
         }
@@ -243,10 +266,10 @@ detect_boxes(const cv::Mat& linemap, cv::Size processor_size, cv::Size image_siz
         rectangle.points(box.data());
 
         // Align to rectangular shape if close to square
-        auto bw        = cv::norm(box[0] - box[1]);
-        auto bh        = cv::norm(box[1] - box[2]);
-        auto box_ratio = std::max(bw, bh) / (std::min(bw, bh) + 1e-5f);
-        if (std::abs(1.f - box_ratio) <= 0.1f)
+        auto bw       = cv::norm(box[0] - box[1]);
+        auto bh       = cv::norm(box[1] - box[2]);
+        auto boxRatio = std::max(bw, bh) / (std::min(bw, bh) + 1e-5f);
+        if (std::abs(1.f - boxRatio) <= 0.1f)
         {
             auto bl = std::ranges::min_element(contours, [](const auto& a, const auto& b) { return a.x < b.x; })->x;
             auto br = std::ranges::max_element(contours, [](const auto& a, const auto& b) { return a.x < b.x; })->x;
@@ -257,63 +280,72 @@ detect_boxes(const cv::Mat& linemap, cv::Size processor_size, cv::Size image_siz
         // Order points in clockwise direction
         std::ranges::rotate(box, std::ranges::min_element(box, [](auto& a, auto& b) { return a.x + a.y < b.x + b.y; }));
 
+        maxConfidence = std::max(maxConfidence, lineMax);
+
+        det.emplace_back(box, scalef, imageSize, lineMax);
 #if defined DEBUG_BOX_DETECTION
-        auto        it   = refbboxesf.begin() + static_cast<int>(det.size() * 8u);
-        cv::Point2f pt1  = {*(it), *(++it)};
-        cv::Point2f pt2  = {*(++it), *(++it)};
-        cv::Point2f pt3  = {*(++it), *(++it)};
-        cv::Point2f pt4  = {*(++it), *(++it)};
-        auto        diff = 0.f;
-        diff += std::abs(pt1.x - box[0].x) + std::abs(pt1.y - box[0].y);
-        diff += std::abs(pt2.x - box[1].x) + std::abs(pt2.y - box[1].y);
-        diff += std::abs(pt3.x - box[2].x) + std::abs(pt3.y - box[2].y);
-        diff += std::abs(pt4.x - box[3].x) + std::abs(pt4.y - box[3].y);
-        if (diff > 0.1f)
-        {    //
-            throw std::logic_error("Found mismatch");
+        {
+            auto it = refbboxesf.begin() + static_cast<int>((det.size() - 1) * 8u);
+            auto [pt1, pt2, pt3, pt4]
+                = std::array<cv::Point2f, 4>{{{*(it), *(++it)}, {*(++it), *(++it)}, {*(++it), *(++it)}, {*(++it), *(++it)}}};
+            auto diff = 0.f;
+            diff += std::abs(pt1.x - box[0].x) + std::abs(pt1.y - box[0].y);
+            diff += std::abs(pt2.x - box[1].x) + std::abs(pt2.y - box[1].y);
+            diff += std::abs(pt3.x - box[2].x) + std::abs(pt3.y - box[2].y);
+            diff += std::abs(pt4.x - box[3].x) + std::abs(pt4.y - box[3].y);
+            if (diff > 0.1f)
+            {    //
+                throw std::logic_error("Found mismatch");
+            }
+        }
+        {
+            auto it   = refbboxesi.begin() + static_cast<int>((det.size() - 1) * 8u);
+            auto pts  = std::array<cv::Point2i, 4>{{{*(it), *(++it)}, {*(++it), *(++it)}, {*(++it), *(++it)}, {*(++it), *(++it)}}};
+            auto boxi = det.back().polygon;
+            if (boxi != pts)
+            {    //
+                throw std::logic_error("Found mismatch");
+            }
         }
 #endif
-        max_confidence = std::max(max_confidence, line_max);
-
-        det.emplace_back(box, scalef, image_size, line_max);
     }
 
-    if (max_confidence > 0)
+    if (maxConfidence > 0)
     {
         for (auto& d : det)
         {
-            d.confidence /= max_confidence;    // Normalize confidence scores
+            d.confidence /= maxConfidence;    // Normalize confidence scores
         }
     }
     return det;
 }
 
-static std::vector<PolygonBox> clean_boxes(const std::vector<PolygonBox>& boxes)
+static std::vector<PolygonBox> CleanBoxes(const std::vector<PolygonBox>& boxes)
 {
-    std::vector<PolygonBox> new_boxes;
+    std::vector<PolygonBox> newBoxes;
 
-    for (const auto& box_obj : boxes)
+    for (const auto& boxObj : boxes)
     {
-        auto box = box_obj.Rect();
-        if (box.width == 0 || box.height == 0) continue;
+        auto box = boxObj.Rect();
+        if (box.width == 0 || box.height == 0) { continue; }
 
         bool contained = false;
 
-        for (const auto& other_box_obj : boxes)
+        for (const auto& otherBoxObj : boxes)
         {
-            if (other_box_obj.polygon == box_obj.polygon)
+            if (otherBoxObj.polygon == boxObj.polygon)
             {
                 continue;    // Skip the same box
             }
 
-            const auto& other_box = other_box_obj.Rect();
-            if (box == other_box)
+            const auto& otherBox = otherBoxObj.Rect();
+            if (box == otherBox)
             {
                 continue;    // Skip identical bounding boxes
             }
 
-            if (box.x >= other_box.x && box.y >= other_box.y && (box.x + box.width) <= (other_box.x + other_box.width)
-                && (box.y + box.height) <= (other_box.y + other_box.height))
+            if (box.x >= otherBox.x && box.y >= otherBox.y && (box.x + box.width) <= (otherBox.x + otherBox.width)
+                && (box.y + box.height) <= (otherBox.y + otherBox.height))
             {
                 contained = true;    // Current box is contained in another
                 break;
@@ -322,17 +354,17 @@ static std::vector<PolygonBox> clean_boxes(const std::vector<PolygonBox>& boxes)
 
         if (!contained)
         {
-            new_boxes.push_back(box_obj);    // Keep the box if not contained
+            newBoxes.push_back(boxObj);    // Keep the box if not contained
         }
     }
 
-    return new_boxes;
+    return newBoxes;
 }
 
-static auto get_and_clean_boxes(const cv::Mat& linemap, cv::Size processor_size, cv::Size image_size, float text_threshold, float low_text)
+static auto GetAndCleanBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, float textThreshold, float lowText)
 {
-    auto bboxes = detect_boxes(linemap, processor_size, image_size, text_threshold, low_text);
-    return clean_boxes(bboxes);
+    auto bboxes = DetectBoxes(linemap, processorSize, imageSize, textThreshold, lowText);
+    return CleanBoxes(bboxes);
 }
 
 struct EfficientViTForSemanticSegmentation : TextDetector
@@ -377,13 +409,16 @@ struct EfficientViTForSemanticSegmentation : TextDetector
         auto width     = static_cast<int>(sizes[3]);
 
         auto preds = logits.permute({1, 0, 2, 3}).reshape({numLabels, chunks * height, width}).slice(1, 0, img.rows);
-        torch::save(preds, "/home/ankurv/papertrail/trials/test1/surya_cpp.preds.pt");
+        torch::save(preds, DEBUG_BOX_DETECTION);
         [[maybe_unused]] auto predSizes   = preds.sizes();
         [[maybe_unused]] auto heatMap     = preds[0].contiguous();
         [[maybe_unused]] auto affinityMap = preds[1].contiguous();
-        [[maybe_unused]] auto bboxes      = get_and_clean_boxes(
+        [[maybe_unused]] auto bboxes      = GetAndCleanBoxes(
             TorchTensorToMat(heatMap), cv::Size(width, img.rows), cv::Size(img.cols, img.rows), TextThreshold, BlankThreshold);
-
+        {
+            std::ofstream bboxdump(DEBUG_BOX_DETECTION ".bbox.txt");
+            for (auto const& p : bboxes) { bboxdump << fmt::format("poly = {}\n", fmt::join(p.polygon, ", ")); }
+        }
         // auto   bboxes = GetBoundingBoxes(preds.permute({1, 2, 0}), TextThreshold, BlankThreshold, BlankThreshold);
         auto   clone = img.clone();
         size_t count = 0;
@@ -393,7 +428,7 @@ struct EfficientViTForSemanticSegmentation : TextDetector
             cv::putText(
                 clone, std::to_string(count++), (p.Rect().tl() + p.Rect().br()) / 2, cv::FONT_HERSHEY_COMPLEX, .6, cv::Scalar(100, 0, 255));
         }
-        cv::imwrite("/home/ankurv/papertrail/trials/test1/surya_cpp.preds.pt.bbox.overlay.png", clone);
+        cv::imwrite(DEBUG_BOX_DETECTION ".bbox.overlay.png", clone);
         return bboxes;
     }
 
