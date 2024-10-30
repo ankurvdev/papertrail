@@ -1,6 +1,7 @@
 #include "CommonMacros.h"
 #include "TextDetector.h"
 
+#include <limits>
 #include <opencv2/core/types.hpp>
 #include <opencv2/opencv.hpp>
 #include <torch/torch.h>
@@ -15,13 +16,13 @@
 #include <stdexcept>
 #include <vector>
 
-SUPPRESS_CLANG_WARNING("-Wdouble-promotion")
 #define DEBUG_TRACE_TEXT_DETECTION 1
 
 #if defined DEBUG_TRACE_TEXT_DETECTION
 SUPPRESS_WARNINGS_START
-SUPPRESS_CLANG_WARNING("-Wexit-time-destructor")
-static inline thread_local std::string PredictionPtFilePath;
+SUPPRESS_CLANG_WARNING("-Wexit-time-destructors")
+SUPPRESS_CLANG_WARNING("-Wglobal-constructors")
+static inline thread_local std::string PredictionPtFilePath;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 SUPPRESS_WARNINGS_END
 #endif
 
@@ -69,10 +70,10 @@ template <> struct fmt::formatter<cv::Point2i> : fmt::formatter<std::string_view
 template <typename TIn, typename TOut> [[maybe_unused]] static std::vector<TOut> TensorToVector(const torch::Tensor& tensor)
 {
     auto              flat     = tensor.flatten().to(torch::TensorOptions().dtype<TIn>());
-    auto              data     = flat.template data_ptr<TIn>();
     auto              datasize = static_cast<size_t>(tensor.numel());
+    auto              data     = std::span(flat.template data_ptr<TIn>(), datasize);
     std::vector<TOut> out(datasize);
-    std::transform(data, data + datasize, out.begin(), [](TIn elem) { return TOut(elem); });
+    std::transform(std::begin(data), data.begin() + static_cast<int>(datasize), out.begin(), [](TIn elem) { return TOut(elem); });
     return out;
 }
 
@@ -153,13 +154,13 @@ template <typename TLeftIterator, typename TRightIterator>
 }
 
 static std::pair<float, float>
-GetDynamicThresholds(const cv::Mat& linemap, float textThreshold, float lowText, float typicalTop10Avg = 0.7f)
+GetDynamicThresholds(const cv::Mat& linemap, float textThreshold, float lowText, float typicalTop10Avg = 0.7f)    // NOLINT
 {
     // Flatten the linemap
     auto flatMap = std::vector<float>(linemap.begin<float>(), linemap.end<float>());
 
     // Calculate number of pixels in top 10%
-    auto top10Count = static_cast<unsigned>(static_cast<float>(flatMap.size()) * 0.9f);
+    auto top10Count = static_cast<unsigned>(static_cast<float>(flatMap.size()) * 0.9f);    // NOLINT
     // Sort the vector to find average intensity of the top 10%
     std::nth_element(flatMap.begin(), flatMap.begin() + top10Count, flatMap.end());
     float avgIntensity
@@ -170,8 +171,8 @@ GetDynamicThresholds(const cv::Mat& linemap, float textThreshold, float lowText,
     scalingFactor       = std::sqrt(scalingFactor);    // Apply square root
 
     // Adjust thresholds
-    lowText       = std::clamp(lowText * scalingFactor, 0.1f, 0.6f);
-    textThreshold = std::clamp(textThreshold * scalingFactor, 0.15f, 0.8f);
+    lowText       = std::clamp(lowText * scalingFactor, 0.1f, 0.6f);           // NOLINT
+    textThreshold = std::clamp(textThreshold * scalingFactor, 0.15f, 0.8f);    // NOLINT
 
     return {textThreshold, lowText};    // Return updated thresholds
 }
@@ -192,8 +193,8 @@ DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, 
 #if defined DEBUG_TRACE_TEXT_DETECTION
     torch::Tensor bboxftensor;
     torch::Tensor bboxitensor;
-    torch::load(bboxftensor, (PredictionPtFilePath + ".trace.bboxesf.pt"));
-    torch::load(bboxitensor, PredictionPtFilePath + ".trace.bboxesi.pt");
+    torch::load(bboxftensor, (PredictionPtFilePath + ".trace.preds.bboxesf.pt"));
+    torch::load(bboxitensor, PredictionPtFilePath + ".trace.preds.bboxesi.pt");
     auto refbboxesf = TensorToVector<float, float>(bboxftensor);
     auto refbboxesi = TensorToVector<int64_t, int>(bboxitensor);
 #endif
@@ -204,7 +205,7 @@ DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, 
     // Get dynamic thresholds (this function needs to be defined separately)
     std::tie(textThreshold, lowText) = GetDynamicThresholds(linemap, textThreshold, lowText);
 
-    cv::Mat               textScoreComb = (linemap > lowText);    // Convert to binary image
+    cv::Mat               textScoreComb = (linemap > static_cast<double>(lowText));    // Convert to binary image
     cv::Mat               labels;
     cv::Mat               stats;
     cv::Mat               centroids;
@@ -222,7 +223,7 @@ DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, 
     for (int k = 1; k < labelCount; ++k)
     {
         int size = stats.at<int>(k, cv::CC_STAT_AREA);
-        if (size < 10)
+        if (size < 10)    // NOLINT
         {
             continue;    // Size filtering
         }
@@ -243,7 +244,7 @@ DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, 
         cv::Mat selectedLinemap;
         linemap(cv::Rect(sx, sy, ex - sx, ey - sy)).copyTo(selectedLinemap, mask);
 
-        double lineMaxD = NAN;
+        double lineMaxD = std::numeric_limits<double>::quiet_NaN();
         cv::minMaxLoc(selectedLinemap, nullptr, &lineMaxD);
 
         auto lineMax = static_cast<float>(lineMaxD);
@@ -275,8 +276,8 @@ DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, 
         // Align to rectangular shape if close to square
         auto bw       = cv::norm(box[0] - box[1]);
         auto bh       = cv::norm(box[1] - box[2]);
-        auto boxRatio = std::max(bw, bh) / (std::min(bw, bh) + 1e-5f);
-        if (std::abs(1.f - boxRatio) <= 0.1f)
+        auto boxRatio = static_cast<float>(std::max(bw, bh) / (std::min(bw, bh) + 1e-5));    // NOLINT
+        if (std::abs(1.f - boxRatio) <= 0.1f)                                                // NOLINT
         {
             auto bl = std::ranges::min_element(contours, [](const auto& a, const auto& b) { return a.x < b.x; })->x;
             auto br = std::ranges::max_element(contours, [](const auto& a, const auto& b) { return a.x < b.x; })->x;
@@ -300,8 +301,8 @@ DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, 
             diff += std::abs(pt2.x - box[1].x) + std::abs(pt2.y - box[1].y);
             diff += std::abs(pt3.x - box[2].x) + std::abs(pt3.y - box[2].y);
             diff += std::abs(pt4.x - box[3].x) + std::abs(pt4.y - box[3].y);
-            if (diff > 0.1f)
-            {    //
+            if (diff > 0.1f)    // NOLINT
+            {                   //
                 throw std::logic_error("Found mismatch");
             }
         }
@@ -426,21 +427,32 @@ struct EfficientViTForSemanticSegmentation : TextDetector
             TorchTensorToMat(heatMap), cv::Size(width, img.rows), cv::Size(img.cols, img.rows), TextThreshold, BlankThreshold);
 #if defined DEBUG_TRACE_TEXT_DETECTION
         {
-            std::ofstream bboxdump(PredictionPtFilePath + ".trace.bbox.txt");
+            std::ofstream bboxdump(PredictionPtFilePath + ".trace.preds.bbox.txt");
             for (auto const& p : bboxes) { bboxdump << fmt::format("poly = {}\n", fmt::join(p.polygon, ", ")); }
         }
 #endif
         // auto   bboxes = GetBoundingBoxes(preds.permute({1, 2, 0}), TextThreshold, BlankThreshold, BlankThreshold);
-        auto   clone = img.clone();
+        auto clone1 = img.clone();
+        auto clone2 = img.clone();
+
         size_t count = 0;
         for (auto const& p : bboxes)
         {
-            cv::polylines(clone, p.polygon, false, cv::Scalar(0, 255, 0));
-            cv::putText(
-                clone, std::to_string(count++), (p.Rect().tl() + p.Rect().br()) / 2, cv::FONT_HERSHEY_COMPLEX, .6, cv::Scalar(100, 0, 255));
+            const cv::Scalar green(cv::Scalar(0, 255, 0));
+            const cv::Scalar red(cv::Scalar(0, 255, 0));
+            cv::rectangle(clone1, p.Rect(), red);
+            cv::polylines(clone2, p.polygon, false, green);
+            cv::putText(clone2,
+                        std::to_string(count++),
+                        (p.Rect().tl() + p.Rect().br()) / 2,
+                        cv::FONT_HERSHEY_COMPLEX,
+                        .6,    // NOLINT
+                        red);
         }
 #if defined DEBUG_TRACE_TEXT_DETECTION
-        cv::imwrite(PredictionPtFilePath + ".trace.bbox.overlay.png", clone);
+        cv::imwrite(PredictionPtFilePath + ".trace.preds.bbox.overlay.png", clone1);
+        cv::imwrite(PredictionPtFilePath + ".trace.preds.bbox.overlay2.png", clone2);
+
 #endif
         return bboxes;
     }
@@ -483,7 +495,7 @@ struct EfficientViTForSemanticSegmentation : TextDetector
             converted = converted / 255.0f;    // NOLINT
             converted.sub_(torch::tensor({ImagenetDefaultMean})).div_(torch::tensor({ImagenetDefaultStd}));
             converted = converted.permute({2, 0, 1});
-#if defined DEBUG_TRACE_TEXT_DETECTION
+#if defined DEBUG_TRACE_TEXT_DETECTION1
             WriteAsImage(converted, "converted.jpg");
             torch::save(converted, "/home/ankurv/papertrail/cpp/libtorch_generated.pt");
             {
@@ -507,14 +519,16 @@ struct EfficientViTForSemanticSegmentation : TextDetector
 std::vector<PolygonBox> EfficientViTForSemanticSegmentation::Run(std::filesystem::path const& image)
 {
 #if defined DEBUG_TRACE_TEXT_DETECTION
-    PredictionPtFilePath = image.stem();
+    PredictionPtFilePath = std::filesystem::absolute(image.parent_path()) / image.stem();
 #endif
-    auto                            img       = cv::imread(image, cv::IMREAD_COLOR);
-    auto                            imgTensor = Process_(img);
+    auto img       = cv::imread(image, cv::IMREAD_COLOR);
+    auto imgTensor = Process_(img);
+
     std::vector<torch::jit::IValue> testInputs;
     testInputs.emplace_back(imgTensor.to(_device));
     auto logits = _model.forward(testInputs).toTensor();
-    logits      = torch::nn::functional::interpolate(logits,
+
+    logits = torch::nn::functional::interpolate(logits,
                                                 torch::nn::functional::InterpolateFuncOptions()
                                                     .size(std::vector<int64_t>{ImageChunkWidth, ImageChunkHeight})
                                                     .mode(torch::kBilinear)
