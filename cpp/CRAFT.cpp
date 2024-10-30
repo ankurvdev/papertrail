@@ -152,11 +152,9 @@ MergeBoundingBoxes(std::vector<BoundingBox>& dets, float distanceThresh, cv::Poi
     }
     return merged;
 }
-static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input */,
-                                                 const torch::Tensor&    output,
-                                                 [[maybe_unused]] double textThresh = .7,
-                                                 double                  linkThresh = .4,
-                                                 double                  lowText    = .4)
+
+std::vector<BoundingBox>
+GetBoundingBoxes(const torch::Tensor& output, [[maybe_unused]] double textThresh, double linkThresh, double lowText)
 {
     std::vector<BoundingBox> detBoxes;
     cv::Mat                  linkMap = TorchModel::ConvertToMat(output.select(2, 0).unsqueeze(0).clone(), true, true, false, false).clone();
@@ -252,7 +250,7 @@ static std::vector<BoundingBox> GetBoundingBoxes(const torch::Tensor& /* input *
         // std::cout << "BOUNDING BOX: " << box << std::endl;
     }
     // # uncomment to see raw output written to disk
-    // cv::imwrite("output-heatmap.jpg", outputScore);
+    cv::imwrite("output-heatmap.jpg", outputScore);
     return detBoxes;
 }
 
@@ -286,7 +284,7 @@ std::vector<BoundingBox> CraftModel::RunDetector(torch::Tensor& input,    // NOL
     std::vector<torch::Tensor> detInput = {input.clone()};
     auto                       output   = TorchModel::Predict(detInput).squeeze().detach().clone();
     // auto                       ss         = std::chrono::high_resolution_clock::now();
-    auto detections = GetBoundingBoxes(input.clone(), output.clone());
+    auto detections = GetBoundingBoxes(output.clone());
     // custom bounding box merging
     if (merge) { detections = MergeBoundingBoxes(detections, .97f, height, width); }
     // auto ee = std::chrono::high_resolution_clock::now();

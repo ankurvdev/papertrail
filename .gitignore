@@ -12,3 +12,5 @@ devel.sh
 devel.py
 __pycache__
 work
+/trials
+
