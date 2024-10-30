@@ -16,6 +16,14 @@
 #include <vector>
 
 SUPPRESS_CLANG_WARNING("-Wdouble-promotion")
+#define DEBUG_TRACE_TEXT_DETECTION 1
+
+#if defined DEBUG_TRACE_TEXT_DETECTION
+SUPPRESS_WARNINGS_START
+SUPPRESS_CLANG_WARNING("-Wexit-time-destructor")
+static inline thread_local std::string PredictionPtFilePath;
+SUPPRESS_WARNINGS_END
+#endif
 
 static constexpr int  ImageChunkHeight = 1200;    // Height at which to slice images vertically
 static constexpr int  ImageChunkWidth  = 1200;
@@ -176,17 +184,16 @@ static cv::Mat TorchTensorToMat(const at::Tensor& tensor)
 
     return matImage;
 }
-#define DEBUG_BOX_DETECTION "/home/ankurv/papertrail/testdata/test1/surya_cpp.preds.pt"
 
 static std::vector<PolygonBox>
 DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, float textThreshold, float lowText)
 {
 
-#if defined DEBUG_BOX_DETECTION
+#if defined DEBUG_TRACE_TEXT_DETECTION
     torch::Tensor bboxftensor;
     torch::Tensor bboxitensor;
-    torch::load(bboxftensor, DEBUG_BOX_DETECTION ".bboxesf.pt" /*"surya_cpp.preds.pt.bboxesf.pt"*/);
-    torch::load(bboxitensor, DEBUG_BOX_DETECTION ".bboxesi.pt" /*"surya_cpp.preds.pt.bboxesi.pt"*/);
+    torch::load(bboxftensor, (PredictionPtFilePath + ".trace.bboxesf.pt"));
+    torch::load(bboxitensor, PredictionPtFilePath + ".trace.bboxesi.pt");
     auto refbboxesf = TensorToVector<float, float>(bboxftensor);
     auto refbboxesi = TensorToVector<int64_t, int>(bboxitensor);
 #endif
@@ -283,7 +290,7 @@ DetectBoxes(const cv::Mat& linemap, cv::Size processorSize, cv::Size imageSize, 
         maxConfidence = std::max(maxConfidence, lineMax);
 
         det.emplace_back(box, scalef, imageSize, lineMax);
-#if defined DEBUG_BOX_DETECTION
+#if defined DEBUG_TRACE_TEXT_DETECTION
         {
             auto it = refbboxesf.begin() + static_cast<int>((det.size() - 1) * 8u);
             auto [pt1, pt2, pt3, pt4]
@@ -409,16 +416,20 @@ struct EfficientViTForSemanticSegmentation : TextDetector
         auto width     = static_cast<int>(sizes[3]);
 
         auto preds = logits.permute({1, 0, 2, 3}).reshape({numLabels, chunks * height, width}).slice(1, 0, img.rows);
-        torch::save(preds, DEBUG_BOX_DETECTION);
+#if defined DEBUG_TRACE_TEXT_DETECTION
+        torch::save(preds, PredictionPtFilePath + ".trace.preds.pt");
+#endif
         [[maybe_unused]] auto predSizes   = preds.sizes();
         [[maybe_unused]] auto heatMap     = preds[0].contiguous();
         [[maybe_unused]] auto affinityMap = preds[1].contiguous();
         [[maybe_unused]] auto bboxes      = GetAndCleanBoxes(
             TorchTensorToMat(heatMap), cv::Size(width, img.rows), cv::Size(img.cols, img.rows), TextThreshold, BlankThreshold);
+#if defined DEBUG_TRACE_TEXT_DETECTION
         {
-            std::ofstream bboxdump(DEBUG_BOX_DETECTION ".bbox.txt");
+            std::ofstream bboxdump(PredictionPtFilePath + ".trace.bbox.txt");
             for (auto const& p : bboxes) { bboxdump << fmt::format("poly = {}\n", fmt::join(p.polygon, ", ")); }
         }
+#endif
         // auto   bboxes = GetBoundingBoxes(preds.permute({1, 2, 0}), TextThreshold, BlankThreshold, BlankThreshold);
         auto   clone = img.clone();
         size_t count = 0;
@@ -428,18 +439,16 @@ struct EfficientViTForSemanticSegmentation : TextDetector
             cv::putText(
                 clone, std::to_string(count++), (p.Rect().tl() + p.Rect().br()) / 2, cv::FONT_HERSHEY_COMPLEX, .6, cv::Scalar(100, 0, 255));
         }
-        cv::imwrite(DEBUG_BOX_DETECTION ".bbox.overlay.png", clone);
+#if defined DEBUG_TRACE_TEXT_DETECTION
+        cv::imwrite(PredictionPtFilePath + ".trace.bbox.overlay.png", clone);
+#endif
         return bboxes;
     }
 
     static torch::Tensor Process_(cv::Mat img)
     {
         cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
-        if (img.type() != CV_8UC3)
-        {
-            throw std::runtime_error("Shit");
-            // convert to CV_8UC3;
-        }
+        assert(img.type() == CV_8UC3);
         if (img.rows > (ImageChunkHeight * MaxBatchSize)) { throw std::runtime_error("Large Image size not implemented"); }
         auto numSplits = (img.rows + ImageChunkHeight - 1) / ImageChunkHeight;
 
@@ -468,19 +477,13 @@ struct EfficientViTForSemanticSegmentation : TextDetector
                 img = resized2;
             }
 
-            {
-                // Split and pad last image
-                // const auto scale = 1.0 / 255.0;
-                // assert(img.channels() == 3);
-                //  img.convertTo(img, CV_32FC3, scale);
-            }
             torch::Tensor converted = torch::zeros({img.rows, img.cols, 3}, torch::kU8);
             std::memcpy(converted.data_ptr(), img.data, static_cast<size_t>(converted.numel()));
             converted = converted.to(torch::kFloat32);
             converted = converted / 255.0f;    // NOLINT
             converted.sub_(torch::tensor({ImagenetDefaultMean})).div_(torch::tensor({ImagenetDefaultStd}));
             converted = converted.permute({2, 0, 1});
-#if defined TODO_VERIFY
+#if defined DEBUG_TRACE_TEXT_DETECTION
             WriteAsImage(converted, "converted.jpg");
             torch::save(converted, "/home/ankurv/papertrail/cpp/libtorch_generated.pt");
             {
@@ -503,6 +506,9 @@ struct EfficientViTForSemanticSegmentation : TextDetector
 
 std::vector<PolygonBox> EfficientViTForSemanticSegmentation::Run(std::filesystem::path const& image)
 {
+#if defined DEBUG_TRACE_TEXT_DETECTION
+    PredictionPtFilePath = image.stem();
+#endif
     auto                            img       = cv::imread(image, cv::IMREAD_COLOR);
     auto                            imgTensor = Process_(img);
     std::vector<torch::jit::IValue> testInputs;

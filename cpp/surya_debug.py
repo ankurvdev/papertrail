@@ -1,7 +1,10 @@
+import contextlib
+from pathlib import Path
+
 import torch
 
 
-def write_tensor_ptc(tensor, file_path):
+def write_tensor_ptc(tensor: torch.Tensor, file_path: Path) -> None:
     """Write tensor to file in format that can be read by torchlib torch.load()"""
     par = torch.nn.Parameter(tensor, requires_grad=False)
     m = torch.nn.Module()
@@ -10,13 +13,48 @@ def write_tensor_ptc(tensor, file_path):
     tensor.save(file_path)
 
 
-def read_tensor_ptc(file_path):
+def read_tensor_ptc(file_path: Path) -> torch.Tensor:
     m = torch.jit.load(file_path)
     return m.state_dict()["0"]
 
 
+def polystr(poly: list[tuple[int, int]]) -> str:
+    return ", ".join([f"[{p[0]}, {p[1]}]" for p in poly])
+
+
+def trace_post_processing(predsfpath: Path):
+    preds = read_tensor_ptc(predsfpath)
+    bboxf = surya.postprocessing.heatmap.get_detected_boxes(preds[0].numpy(), 0.6, 0.35)
+    result = surya.detection.parallel_get_lines([preds[0].numpy(), preds[1].numpy()], [3840, 2160])
+
+    write_tensor_ptc(
+        torch.tensor([poly.polygon for poly in bboxf]),
+        predsfpath.with_suffix(".bboxesf.pt"),
+    )
+    write_tensor_ptc(
+        torch.tensor([p.polygon for p in result.bboxes], dtype=torch.long),
+        predsfpath.with_suffix(".bboxesi.pt"),
+    )
+
+    pathlib.Path(predsfpath.with_suffix(".bbox.txt")).write_text(
+        "".join([f"poly = {polystr(p.polygon)}\n" for p in result.bboxes]),
+        encoding="utf-8",
+    )
+
+    result.affinity_map = None
+    result.heatmap = None
+    pathlib.Path(predsfpath.with_suffix(".result.txt")).write_text(pprint.pformat(result.__dict__), encoding="utf-8")
+    bboxes = [poly.bbox for poly in result.bboxes]
+    surya.postprocessing.heatmap.draw_bboxes_on_image(bboxes, img)
+    img.save(predsfpath.with_suffix(".bbox.overlay.png"))
+
+
+class InterceptError(Exception):
+    pass
+
+
 if __name__ == "__main__":
-    import json
+    import functools
     import pathlib
     import pprint
     import sys
@@ -24,32 +62,29 @@ if __name__ == "__main__":
     import PIL.Image
     import surya
     import surya.detection
+    import surya.model.detection.model
     import surya.postprocessing.heatmap
 
-    imgfpath = sys.argv[1]
-    for predsfpath in sys.argv[2:]:
-        img = PIL.Image.open(imgfpath).convert("RGB")
-        preds = read_tensor_ptc(predsfpath)
-        bboxf = surya.postprocessing.heatmap.get_detected_boxes(preds[0].numpy(), 0.6, 0.35)
-        result = surya.detection.parallel_get_lines([preds[0].numpy(), preds[1].numpy()], [3840, 2160])
-        write_tensor_ptc(
-            torch.tensor([poly.polygon for poly in bboxf]),
-            predsfpath + ".bboxesf.pt",
-        )
-        write_tensor_ptc(
-            torch.tensor([p.polygon for p in result.bboxes], dtype=torch.long),
-            predsfpath + ".bboxesi.pt",
-        )
+    imgfpath = Path(sys.argv[1])
+    detector_model = surya.model.detection.model.load_model()
+    processor_model = surya.model.detection.model.load_processor()
+    img = PIL.Image.open(imgfpath).convert("RGB")
 
-        def polystr(poly):
-            return ", ".join([f"[{p[0]}, {p[1]}]" for p in poly])
+    def detector_wrapper(fn: any, *args, **kwargs) -> any:
+        write_tensor_ptc(kwargs["pixel_values"], imgfpath.with_suffix(".trace.detector.pixel_values.pt"))
+        logits = fn(detector_model, *args, **kwargs)
+        write_tensor_ptc(logits.logits, imgfpath.with_suffix(".trace.detector.logits.pt"))
+        return logits
 
-        bboxstr = "".join([f"poly = {polystr(p.polygon)}\n" for p in result.bboxes])
-        pathlib.Path(predsfpath + ".bbox.txt").write_text(bboxstr, encoding="utf-8")
+    def processor_wrapper(fn: any, *args, **kwargs) -> any:
+        write_tensor_ptc(torch.from_numpy(args[0]), imgfpath.with_suffix(".trace.processor.input.pt"))
+        return fn(processor_model, *args, **kwargs)
 
-        result.affinity_map = None
-        result.heatmap = None
-        pathlib.Path(predsfpath + ".result.txt").write_text(pprint.pformat(result.__dict__), encoding="utf-8")
-        bboxes = [poly.bbox for poly in result.bboxes]
-        surya.postprocessing.heatmap.draw_bboxes_on_image(bboxes, img)
-        img.save(predsfpath + ".bbox.overlay.png")
+    detector_model.__class__.__call__ = functools.partial(detector_wrapper, detector_model.__class__.__call__)
+    processor_model.__class__.__call__ = functools.partial(processor_wrapper, processor_model.__class__.__call__)
+
+    output = list(surya.detection.batch_detection([img], detector_model, processor_model))
+    write_tensor_ptc(torch.tensor(output[0][0][0]), imgfpath.with_suffix(".trace.preds.pt"))
+    trace_post_processing(imgfpath.with_suffix(".trace.preds.pt"))
+    for predsfpath in [Path(arg) for arg in sys.argv[2:]]:
+        trace_post_processing(predsfpath)
