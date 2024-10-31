@@ -91,7 +91,7 @@ try
                 std::cout << "CONFIDENCE " << result.confidence << '\n';
                 std::cout << "################################################" << '\n';
             }*/
-            cv::imwrite((fpath.parent_path() / "output-heatmap.jpg").c_str(), clone);
+            // cv::imwrite((fpath.parent_path() / "output-heatmap.jpg").c_str(), clone);
         }
     }
 } catch (std::exception const& ex)

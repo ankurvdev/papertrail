@@ -16,7 +16,7 @@
 #include <stdexcept>
 #include <vector>
 
-#define DEBUG_TRACE_TEXT_DETECTION 1
+// #define DEBUG_TRACE_TEXT_DETECTION 1
 
 #if defined DEBUG_TRACE_TEXT_DETECTION
 SUPPRESS_WARNINGS_START
@@ -82,8 +82,8 @@ template <typename TLeftIterator, typename TRightIterator>
                                                          TLeftIterator  leftEnd,
                                                          TRightIterator rightBegin,
                                                          TRightIterator rightEnd,
-                                                         float const    tolerance  = 3e-5f,
-                                                         float const    absDiffMin = 1e-45f)
+                                                         double const   tolerance  = 3e-5,
+                                                         double const   absDiffMin = 1e-45)
 {
 
     using expectedValueType = typename TLeftIterator::value_type;
@@ -91,11 +91,11 @@ template <typename TLeftIterator, typename TRightIterator>
 
     struct Result
     {
-        double            misMatchRatio{};
-        double            skippedRatio{};
-        expectedValueType maxTolerance{};
-        expectedValueType maxDiff{};
-        int               firstMismatch = -1;
+        double misMatchRatio{};
+        double skippedRatio{};
+        double maxTolerance{};
+        double maxDiff{};
+        int    firstMismatch = -1;
     } result{.maxTolerance = tolerance};
 
     int numSkipped    = 0;
@@ -105,21 +105,40 @@ template <typename TLeftIterator, typename TRightIterator>
     int               mismatchIndex = -1;
     expectedValueType expectedValueMismatch{};
     RhsType           rhsMismatch{};
+    auto              ldist = std::distance(leftBegin, leftEnd);
+    auto              rdist = std::distance(rightBegin, rightEnd);
 
-    if (std::distance(leftBegin, leftEnd) != std::distance(rightBegin, rightEnd))
-    {
-        throw std::runtime_error("expectedValue and rhs size does not match: " + std::to_string(std::distance(leftBegin, leftEnd))
-                                 + "!=" + std::to_string(std::distance(rightBegin, rightEnd)));
-    }
+    if (ldist != rdist) { throw std::runtime_error(fmt::format("expectedValue and rhs size does not match: {} != {}", ldist, rdist)); }
 
     for (int i = 0; leftBegin != leftEnd; ++leftBegin, ++rightBegin, ++i)
     {
         numTotal++;
+        SUPPRESS_WARNINGS_START
+        SUPPRESS_CLANG_WARNING("-Wabsolute-value")
+        SUPPRESS_CLANG_WARNING("-Wdouble-promotion")
 
+        auto diffcalc = [](auto const& l, auto const& r) {
+            if constexpr (!std::is_integral_v<decltype(l)>)
+            {
+                auto const absDiff      = static_cast<double>(abs(l - r));
+                auto const leftPctDiff  = (FP_ZERO == fpclassify(l)) ? 100.f : ((absDiff / static_cast<double>(abs(l))) * 100.f);
+                auto const rightPctDiff = (FP_ZERO == fpclassify(r)) ? 100.f : ((absDiff / static_cast<double>(abs(r))) * 100.f);
+                return std::tuple{absDiff, leftPctDiff, rightPctDiff};
+            }
+            else
+            {
+
+                auto const absDiff      = static_cast<double>(abs(l - r));
+                auto const leftPctDiff  = (l == 0) ? ((l == r) ? 0.f : 100.f) : ((absDiff / abs(l)) * 100.f);
+                auto const rightPctDiff = (r == 0) ? ((l == r) ? 0.f : 100.f) : ((absDiff / abs(r)) * 100.f);
+                return std::tuple{absDiff, leftPctDiff, rightPctDiff};
+            }
+            // else { throw std::runtime_error("Not implemented"); }
+        };
+        SUPPRESS_WARNINGS_END
+
+        auto const [absDiff, leftPctDiff, rightPctDiff] = diffcalc(*leftBegin, *rightBegin);
         // To avoid division by 0, when the denominator is 0 the % delta is considered to be 100%.
-        auto const absDiff      = abs(*leftBegin - *rightBegin);
-        auto const leftPctDiff  = (FP_ZERO == fpclassify(*leftBegin)) ? 100.f : ((absDiff / abs(*leftBegin)) * 100.f);
-        auto const rightPctDiff = (FP_ZERO == fpclassify(*rightBegin)) ? 100.f : ((absDiff / abs(*rightBegin)) * 100.f);
 
         // Perform a strong check on tolerance similar to what boost does.
         bool const isMismatch = (leftPctDiff > tolerance || rightPctDiff > tolerance);
@@ -431,29 +450,7 @@ struct EfficientViTForSemanticSegmentation : TextDetector
             for (auto const& p : bboxes) { bboxdump << fmt::format("poly = {}\n", fmt::join(p.polygon, ", ")); }
         }
 #endif
-        // auto   bboxes = GetBoundingBoxes(preds.permute({1, 2, 0}), TextThreshold, BlankThreshold, BlankThreshold);
-        auto clone1 = img.clone();
-        auto clone2 = img.clone();
 
-        size_t count = 0;
-        for (auto const& p : bboxes)
-        {
-            const cv::Scalar green(cv::Scalar(0, 255, 0));
-            const cv::Scalar red(cv::Scalar(0, 255, 0));
-            cv::rectangle(clone1, p.Rect(), red);
-            cv::polylines(clone2, p.polygon, false, green);
-            cv::putText(clone2,
-                        std::to_string(count++),
-                        (p.Rect().tl() + p.Rect().br()) / 2,
-                        cv::FONT_HERSHEY_COMPLEX,
-                        .6,    // NOLINT
-                        red);
-        }
-#if defined DEBUG_TRACE_TEXT_DETECTION
-        cv::imwrite(PredictionPtFilePath + ".trace.preds.bbox.overlay.png", clone1);
-        cv::imwrite(PredictionPtFilePath + ".trace.preds.bbox.overlay2.png", clone2);
-
-#endif
         return bboxes;
     }
 
@@ -466,50 +463,74 @@ struct EfficientViTForSemanticSegmentation : TextDetector
 
         int                        top = 0;
         std::vector<torch::Tensor> tensors;
-        for (int i = 0; i < numSplits; i++)
+        for (int i = 0; i < numSplits; i++, top += ImageChunkHeight)
         {
-            int height        = std::min(top + ImageChunkHeight, img.rows) - top;
-            int paddingNeeded = ImageChunkHeight - height;
-            img               = img(cv::Rect{0, top, img.cols, height});
+            int  height        = std::min(top + ImageChunkHeight, img.rows) - top;
+            int  paddingNeeded = ImageChunkHeight - height;
+            auto cropped       = img(cv::Rect{0, top, img.cols, height}).clone();
 
             if (paddingNeeded > 0)
             {
                 const cv::Scalar red(0, 0, 255);    // BGR color for red
                 cv::Mat          padded;
-                cv::copyMakeBorder(img, padded, 0, paddingNeeded, 0, 0, cv::BORDER_CONSTANT, red);
-                img = padded;
+                cv::copyMakeBorder(cropped, padded, 0, paddingNeeded, 0, 0, cv::BORDER_CONSTANT, red);
+                cropped = padded;
             }
             {
+#if defined DEBUG_TRACE_TEXT_DETECTION
+                cv::imwrite(fmt::format(PredictionPtFilePath + ".trace.split.{}.png", i), cropped);
+#endif
                 // This double resize actually necessary for downstream accuracy
                 cv::Mat resized1;
-                int     aspectRatioHeight = static_cast<int>(ImageChunkHeight * (ImageChunkWidth / static_cast<double>(img.cols)));
-                cv::resize(img, resized1, {ImageChunkWidth, aspectRatioHeight}, 0, 0, cv::INTER_LANCZOS4);
+                int     aspectRatioHeight = static_cast<int>(ImageChunkHeight * (ImageChunkWidth / static_cast<double>(cropped.cols)));
+                cv::resize(cropped, resized1, {ImageChunkWidth, aspectRatioHeight}, 0, 0, cv::INTER_LANCZOS4);
                 cv::Mat resized2;
                 cv::resize(resized1, resized2, {ImageChunkWidth, ImageChunkHeight}, 0, 0, cv::INTER_LANCZOS4);
-                img = resized2;
+                cropped = resized2;
+#if defined DEBUG_TRACE_TEXT_DETECTION
+                cv::imwrite(fmt::format(PredictionPtFilePath + ".trace.split.{}.resized.png", i), cropped);
+                // cropped = cv::imread(fmt::format(PredictionPtFilePath + ".trace.pillowresized.{}.png", i));
+#endif
             }
 
-            torch::Tensor converted = torch::zeros({img.rows, img.cols, 3}, torch::kU8);
-            std::memcpy(converted.data_ptr(), img.data, static_cast<size_t>(converted.numel()));
+            torch::Tensor converted = torch::zeros({cropped.rows, cropped.cols, 3}, torch::kU8);
+            std::memcpy(converted.data_ptr(), cropped.data, static_cast<size_t>(converted.numel()));
+
+#if defined DEBUG_TRACE_TEXT_DETECTION
+            {
+                torch::Tensor l;
+                torch::load(l, (PredictionPtFilePath + fmt::format(".trace.processor.input{}.pt", i)));
+                auto lvec = TensorToVector<uint8_t, uint8_t>(l);
+                auto rvec = TensorToVector<uint8_t, uint8_t>(converted);
+                TestCollectionsClose(lvec.begin(), lvec.end(), rvec.begin(), rvec.end());
+            }
+#endif
+
             converted = converted.to(torch::kFloat32);
             converted = converted / 255.0f;    // NOLINT
             converted.sub_(torch::tensor({ImagenetDefaultMean})).div_(torch::tensor({ImagenetDefaultStd}));
             converted = converted.permute({2, 0, 1});
-#if defined DEBUG_TRACE_TEXT_DETECTION1
-            WriteAsImage(converted, "converted.jpg");
-            torch::save(converted, "/home/ankurv/papertrail/cpp/libtorch_generated.pt");
+#if defined DEBUG_TRACE_TEXT_DETECTION
             {
-                torch::Tensor reftensor;
-                torch::load(reftensor, "/home/ankurv/papertrail/cpp/libtorch_reference.pt");
-                std::vector<float>    mine       = TensorToVector<float, float>(converted);
-                std::vector<float>    ref        = TensorToVector<float, float>(reftensor);
-                [[maybe_unused]] auto mismatches = TestCollectionsClose(mine.begin(), mine.end(), ref.begin(), ref.end());
-                WriteAsImage(reftensor, "reference.jpg");
+                torch::Tensor l;
+                torch::load(l, (PredictionPtFilePath + fmt::format(".trace.processor.output{}.pt", i)));
+                auto lvec = TensorToVector<float, float>(l);
+                auto rvec = TensorToVector<float, float>(converted);
+                TestCollectionsClose(lvec.begin(), lvec.end(), rvec.begin(), rvec.end());
             }
 #endif
+
             tensors.push_back(converted);
         }
-        return torch::stack(tensors);
+        auto output = torch::stack(tensors);
+#if defined DEBUG_TRACE_TEXT_DETECTION
+        torch::Tensor l;
+        torch::load(l, (PredictionPtFilePath + ".trace.detector.pixel_values.pt"));
+        auto lvec = TensorToVector<float, float>(l);
+        auto rvec = TensorToVector<float, float>(output);
+        TestCollectionsClose(lvec.begin(), lvec.end(), rvec.begin(), rvec.end());
+#endif
+        return output;
     }
 
     torch::Device              _device;
@@ -518,8 +539,9 @@ struct EfficientViTForSemanticSegmentation : TextDetector
 
 std::vector<PolygonBox> EfficientViTForSemanticSegmentation::Run(std::filesystem::path const& image)
 {
+    auto fpathstem = std::filesystem::absolute(image.parent_path()) / image.stem();
 #if defined DEBUG_TRACE_TEXT_DETECTION
-    PredictionPtFilePath = std::filesystem::absolute(image.parent_path()) / image.stem();
+    PredictionPtFilePath = fpathstem;
 #endif
     auto img       = cv::imread(image, cv::IMREAD_COLOR);
     auto imgTensor = Process_(img);
@@ -534,8 +556,34 @@ std::vector<PolygonBox> EfficientViTForSemanticSegmentation::Run(std::filesystem
                                                     .mode(torch::kBilinear)
                                                     .align_corners(false));
 
-    return ProcessPredictions_(logits, img);
+    auto bboxes = ProcessPredictions_(logits, img);
+
+    // #if defined DEBUG_TRACE_TEXT_DETECTION
+    //  auto   bboxes = GetBoundingBoxes(preds.permute({1, 2, 0}), TextThreshold, BlankThreshold, BlankThreshold);
+    auto   clone1 = cv::imread(image, cv::IMREAD_COLOR);
+    auto   clone2 = cv::imread(image, cv::IMREAD_COLOR);
+    size_t count  = 0;
+    for (auto const& p : bboxes)
+    {
+        const cv::Scalar green(cv::Scalar(0, 255, 0));
+        const cv::Scalar red(cv::Scalar(0, 0, 255));
+        auto             rect = p.Rect();
+        cv::rectangle(clone1, rect, red);
+        cv::polylines(clone2, p.polygon, false, green);
+        cv::putText(clone2,
+                    std::to_string(count++),
+                    (p.Rect().tl() + p.Rect().br()) / 2,
+                    cv::FONT_HERSHEY_COMPLEX,
+                    .6,    // NOLINT
+                    red);
+    }
+    cv::imwrite(fpathstem.string() + ".trace.preds.bbox.overlay.png", clone1);
+    cv::imwrite(fpathstem.string() + ".trace.preds.bbox.overlay2.png", clone2);
+
+    // #endif
+    return bboxes;
 }
+
 std::unique_ptr<TextDetector> TextDetector::Create(torch::Device device)
 {
     return std::make_unique<EfficientViTForSemanticSegmentation>(device,

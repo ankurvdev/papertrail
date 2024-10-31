@@ -19,9 +19,12 @@ def write_tensor_ptc(tensor: torch.Tensor, file_path: Path) -> None:
     m.register_parameter("0", par)
     jitted = torch.jit.script(m)
     jitted.save(file_path)
-    if len(tensor.shape) == 3 and tensor.shape[2] == 3 and tensor.dtype == torch.uint8:
-        # Ensure the tensor is on the CPU and convert it to a NumPy array
-        cv2.imwrite(file_path.with_suffix(".png"), tensor.cpu().numpy())
+    if len(tensor.shape) == 3:
+        if tensor.shape[2] == 3 and tensor.dtype == torch.uint8:
+            # Ensure the tensor is on the CPU and convert it to a NumPy array
+            cv2.imwrite(file_path.with_suffix(".png"), tensor.cpu().numpy())
+        if tensor.shape[0] == 3 and tensor.dtype == torch.float32:
+            pass
 
 
 def read_tensor_ptc(file_path: Path) -> torch.Tensor:
@@ -74,8 +77,15 @@ def trace_image(imgfpath: Path) -> None:
         return logits
 
     def processor_wrapper(fn: any, *args: any, **kwargs: any) -> any:
-        write_tensor_ptc(torch.from_numpy(args[0]), imgfpath.with_suffix(".trace.processor.input.pt"))
-        return fn(processor_model, *args, **kwargs)
+        if not hasattr(processor_wrapper, "counter"):
+            processor_wrapper.counter = 0  # it doesn't exist yet, so initialize it
+        write_tensor_ptc(torch.from_numpy(args[0]), imgfpath.with_suffix(f".trace.processor.input{processor_wrapper.counter}.pt"))
+        outval = fn(processor_model, *args, **kwargs)
+        write_tensor_ptc(
+            torch.tensor(outval["pixel_values"][0]), imgfpath.with_suffix(f".trace.processor.output{processor_wrapper.counter}.pt")
+        )
+        processor_wrapper.counter += 1
+        return outval
 
     detector_model.__class__.__call__ = functools.partial(detector_wrapper, detector_model.__class__.__call__)
     processor_model.__class__.__call__ = functools.partial(processor_wrapper, processor_model.__class__.__call__)

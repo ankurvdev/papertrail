@@ -250,7 +250,7 @@ GetBoundingBoxes(const torch::Tensor& output, [[maybe_unused]] double textThresh
         // std::cout << "BOUNDING BOX: " << box << std::endl;
     }
     // # uncomment to see raw output written to disk
-    cv::imwrite("output-heatmap.jpg", outputScore);
+    // cv::imwrite("output-heatmap.jpg", outputScore);
     return detBoxes;
 }
 
