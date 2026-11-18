@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.26)
+project(papertrail)
+find_package(Quick)
+if (NOT Quick_FOUND)
+set(Quick_DIR "${CMAKE_CURRENT_LIST_DIR}/../build/cmake")
+find_package(Quick REQUIRED)
+endif()
+quickload_config(papertrail.config.ini quick.config.ini)

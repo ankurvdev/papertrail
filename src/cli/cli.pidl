@@ -1,0 +1,59 @@
+struct ScannerArgs {
+    list<string> path  (Description = "List of files/directories to scan"),
+}
+
+struct SearchArgs {
+    list<string> query
+}
+
+struct Item {
+    string path
+    timestamp lastmodified
+    uint64 size
+    string hash
+}
+
+struct SearchResultItem {
+    string url
+    string path
+    timestamp lastmodified
+    uint64 size
+    string hash
+    string filename
+    string content
+    string snippet
+}
+
+interface Scanner {
+    event Result(int requestId, SearchResultItem result)
+    event ScanProgress(int requestId, uint total, uint completed)
+    event ScanFinished(int requestId)
+
+    int Scan(list<string> path)
+}
+
+interface Searcher {
+    event Result(int requestId, SearchResultItem result)
+    event ScanProgress(int requestId, uint total, uint completed)
+    event ScanFinished(int requestId)
+
+    list<SearchResultItem> Search(string q)
+}
+
+struct WebServer {
+    uint16 port = 41118
+}
+
+struct CommandLineOptions 
+{
+    string work_dir = "."      (Description = "Cache storage")
+    bool   console = false
+    bool   debug   = false
+    bool   verbose = false
+
+    ScannerArgs scan;
+    SearchArgs  search;
+    WebServer   web;
+
+} (Description = "Command Line tool")
+

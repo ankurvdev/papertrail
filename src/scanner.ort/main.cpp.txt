@@ -1,0 +1,171 @@
+// ocrtest: image -> text boxes (JSON) + reading-order markdown.
+//
+//   PP-DocLayoutV3    layout blocks + reading order   ONNX Runtime
+//   PP-OCRv6 det/rec  text line quads + text           ONNX Runtime
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "pipeline.h"
+
+namespace fs = std::filesystem;
+using namespace ocr;
+
+namespace
+{
+
+char const* kUsage = R"(usage: ocrtest [options] <image> [<image> ...]
+
+Writes <out>/<name>.json (blocks + lines with boxes) and <out>/<name>.md (reading-order text).
+
+  -o, --out DIR          output directory (default: .)
+  -m, --models DIR       model directory (default: $OCRTEST_MODELS or ./models)
+      --ocr SIZE         PP-OCRv6 variant: tiny | small | medium (default: medium)
+      --no-layout        skip PP-DocLayoutV3, group lines geometrically
+      --viz              also write <name>.viz.png: layout blocks + line boxes
+      --overlay          also write <name>.overlay.jpg: original | red line boxes with the recognised text
+      --font FILE        font(s) for --overlay, first wins (default: <models>/fonts/*, else a system font)
+      --min-score X      drop recognised lines below this confidence (default: 0.3)
+      --det-max-side N   max image side for text detection (default: 4000)
+  -t, --threads N        CPU threads (default: all cores)
+)";
+
+[[noreturn]] void usage(int code)
+{
+    std::fputs(kUsage, code ? stderr : stdout);
+    std::exit(code);
+}
+
+struct Args
+{
+    PipelineOptions          opt;
+    std::vector<std::string> images;
+    std::string              out = ".";
+    std::vector<std::string> fonts;
+    bool                     viz = false, overlay = false;
+};
+
+Args parse(int argc, char** argv)
+{
+    Args a;
+    a.opt.threads = int(std::max(1u, std::thread::hardware_concurrency()));
+    if (char const* m = std::getenv("OCRTEST_MODELS")) a.opt.models = m;
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string const s    = argv[i];
+        auto              next = [&]() -> std::string {
+            if (i + 1 >= argc) usage(2);
+            return argv[++i];
+        };
+        try
+        {
+            if (s == "-h" || s == "--help") usage(0);
+            else if (s == "-o" || s == "--out") a.out = next();
+            else if (s == "-m" || s == "--models") a.opt.models = next();
+            // else if (s == "--ocr") a.opt.ocr_size = next();
+            else if (s == "--no-layout") a.opt.layout = false;
+            else if (s == "--viz") a.viz = true;
+            else if (s == "--overlay") a.overlay = true;
+            else if (s == "--font") a.fonts.push_back(next());
+            else if (s == "--min-score") a.opt.min_score = std::stof(next());
+            else if (s == "--det-max-side") a.opt.det.max_side_len = std::stoi(next());
+            else if (s == "-t" || s == "--threads") a.opt.threads = std::max(1, std::stoi(next()));
+            else if (!s.empty() && s[0] == '-') usage(2);
+            else a.images.push_back(s);
+        } catch (std::logic_error const&)
+        {    // bad number
+            usage(2);
+        }
+    }
+    if (a.images.empty()) usage(2);
+    return a;
+}
+
+// --font, else every font in <models>/fonts (sorted: primary first, fallbacks after), else a system font.
+std::vector<std::string> find_fonts(Args const& a)
+{
+    if (!a.fonts.empty()) return a.fonts;
+    std::vector<std::string> found;
+    fs::path const           dir = fs::path(a.opt.models) / "fonts";
+    if (fs::is_directory(dir))
+        for (auto const& e : fs::directory_iterator(dir))
+        {
+            std::string ext = e.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            if (ext == ".ttf" || ext == ".otf" || ext == ".ttc") found.push_back(e.path().string());
+        }
+    std::sort(found.begin(), found.end());
+    for (char const* p : {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                          "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                          "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                          "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                          "/Library/Fonts/Arial Unicode.ttf",
+                          "/System/Library/Fonts/Supplemental/Arial.ttf"})
+        if (found.empty() && fs::exists(p)) found.push_back(p);
+    return found;
+}
+
+void write_file(std::string const& path, std::string const& s)
+{
+    std::ofstream f(path, std::ios::binary);
+    if (!f || !(f << s)) throw std::runtime_error("cannot write " + path);
+}
+
+}    // namespace
+
+int main(int argc, char** argv)
+{
+    Args const args = parse(argc, argv);
+    try
+    {
+        auto const     t0 = std::chrono::steady_clock::now();
+        Pipeline const pipeline(args.opt);
+        std::fprintf(stderr,
+                     "models loaded in %.1f s (%d threads)\n",
+                     std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(),
+                     args.opt.threads);
+        fs::create_directories(args.out);
+        std::unique_ptr<Font> font;
+        if (args.overlay)
+        {
+            font = std::make_unique<Font>(find_fonts(args));
+            if (font->empty()) std::fprintf(stderr, "warning: no usable font found, --overlay draws boxes only\n");
+        }
+        Progress const progress = [](std::string const& line) { std::fprintf(stderr, "%s\n", line.c_str()); };
+        for (std::string const& path : args.images)
+        {
+            auto const  t1  = std::chrono::steady_clock::now();
+            Image const img = load_image(path);
+            std::fprintf(stderr, "%s (%dx%d)\n", path.c_str(), img.w, img.h);
+            Page page              = pipeline.run(img, progress);
+            page.path              = path;
+            std::string const stem = (fs::path(args.out) / fs::path(path).stem()).string();
+            write_file(stem + ".json", to_json(page));
+            write_file(stem + ".md", to_markdown(page));
+            if (args.viz && !save_png(stem + ".viz.png", draw_page(img, page)))
+                throw std::runtime_error("cannot write " + stem + ".viz.png");
+            if (font && !save_jpg(stem + ".overlay.jpg", side_by_side(img, draw_overlay(img, page, *font))))
+                throw std::runtime_error("cannot write " + stem + ".overlay.jpg");
+            std::fprintf(stderr,
+                         "  -> %s.{json,md}%s%s  %zu blocks, %zu lines, %.1f s\n",
+                         stem.c_str(),
+                         args.viz ? " + .viz.png" : "",
+                         font ? " + .overlay.jpg" : "",
+                         page.blocks.size(),
+                         page.lines.size(),
+                         std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count());
+        }
+    } catch (std::exception const& e)
+    {
+        std::fprintf(stderr, "error: %s\n", e.what());
+        return 1;
+    }
+    return 0;
+}

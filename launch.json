@@ -1,0 +1,52 @@
+﻿{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "lldb-cmake-target",
+      "type": "lldb-dap",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [
+        "--work-dir",
+        "/Users/ankurv/run/papertrail",
+        "scan",
+        "--path",
+        "/Users/ankurv/run/ftr"
+      ],
+      "stopAtEntry": false,
+      "cwd": "${command:cmake.getLaunchTargetDirectory}",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "/opt/homebrew/bin:$PATH"
+        }
+      ],
+      "console": "integratedTerminal",
+      "MIMode": "lldb",
+      "setupCommands": [
+        {
+          "description": "Break on C++ exceptions",
+          "text": "pro hand -p true -s false -n false SIGCONT",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Break on C++ exceptions",
+          "text": "breakpoint set -E c++",
+          "ignoreFailures": true
+        }
+      ],
+      "preRunCommands": [
+        "breakpoint name configure --disable cpp_exception"
+      ],
+      "1program": "${command:python.interpreterPath}",
+      "env": {},
+      "disableASLR": false,
+      "1sourceMap": [
+        [
+          "/path/to/build/dir",
+          "${workspaceFolder}"
+        ]
+      ]
+    }
+  ]
+}
