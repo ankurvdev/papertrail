@@ -6,6 +6,7 @@
 //
 // Pre/post-processing follows PaddleOCR 3.x (PaddleX) so results match the official Python pipeline.
 // Usage: ocrtest <image> [<image> ...] <output-dir>
+#include "FileDownload.h"
 #include "Scanner.h"
 
 #include <clipper2/clipper.h>
@@ -25,9 +26,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iostream>
 #include <numeric>
 #include <ranges>
 #include <set>
@@ -43,6 +42,8 @@ using Json   = nlohmann::ordered_json;
 
 namespace
 {
+
+using Quad = std::array<cv::Point2f, 4>;    // top-left, top-right, bottom-right, bottom-left
 
 struct Line
 {
@@ -742,7 +743,7 @@ static std::vector<Block> GroupOrphans(std::vector<Line> const& lines)
     for (size_t i = 0; i < lines.size(); ++i)
         if (lines.at(i).block < 0) orphans.push_back(static_cast<int>(i));
     std::vector<size_t> parent(orphans.size());
-    std::iota(parent.begin(), parent.end(), size_t{0});
+    std::ranges::iota(parent, size_t{0});
     std::function<size_t(size_t)> find = [&](size_t x) { return parent.at(x) == x ? x : parent.at(x) = find(parent.at(x)); };
     for (size_t a = 0; a < orphans.size(); ++a)
         for (size_t b = a + 1; b < orphans.size(); ++b)
@@ -940,15 +941,26 @@ static cv::Mat DrawOverlay(cv::Mat const& img, Page const& page, cv::Ptr<cv::fre
 // ---------------------------------------------------------------------------------------------
 static Models LoadModels(Ort::Env& env, fs::path const& dir)
 {
+#define HFBASEURL(x) (std::string_view("https://huggingface.co/PaddlePaddle/" x))    // NOLINT
+
+    static constexpr auto UrlLayout = HFBASEURL("PP-DocLayoutV3_onnx/resolve/46bbdf188bb0a772c08aed74882ce7e51a8f1ea6/inference.onnx");
+    static constexpr auto UrlDet    = HFBASEURL("PP-OCRv6_medium_det_onnx/resolve/61323801669c338b7891481ec7bac61ce31b576a/inference.onnx");
+    static constexpr auto UrlRec    = HFBASEURL("PP-OCRv6_medium_rec_onnx/resolve/50c7eacafc52fa7bcf4194e8cd08e46f8558504b/inference.onnx");
+    static constexpr auto UrlLayoutCfg = HFBASEURL("PP-DocLayoutV3_onnx/resolve/46bbdf188bb0a772c08aed74882ce7e51a8f1ea6/inference.yml");
+    static constexpr auto UrlRecCfg = HFBASEURL("PP-OCRv6_medium_rec_onnx/resolve/50c7eacafc52fa7bcf4194e8cd08e46f8558504b/inference.yml");
+    static constexpr std::string_view NotoSansSC
+        = "https://raw.githubusercontent.com/google/fonts/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf";
+
+    std::filesystem::create_directories(dir / "fonts");
     Models m{
-        .layout  = LoadModel(env, dir / "PP-DocLayoutV3/inference.onnx"),
-        .det     = LoadModel(env, dir / "PP-OCRv6_medium_det/inference.onnx"),
-        .rec     = LoadModel(env, dir / "PP-OCRv6_medium_rec/inference.onnx"),
-        .labels  = YamlList(dir / "PP-DocLayoutV3/inference.yml", {"label_list"}),
+        .layout  = LoadModel(env, DownloadFile(UrlLayout, dir / "PP-DocLayoutV3/inference.onnx")),
+        .det     = LoadModel(env, DownloadFile(UrlDet, dir / "PP-OCRv6_medium_det/inference.onnx")),
+        .rec     = LoadModel(env, DownloadFile(UrlRec, dir / "PP-OCRv6_medium_rec/inference.onnx")),
+        .labels  = YamlList(DownloadFile(UrlLayoutCfg, dir / "PP-DocLayoutV3/inference.yml"), {"label_list"}),
         .charset = {},
         .font    = {},
     };
-    auto dict = YamlList(dir / "PP-OCRv6_medium_rec/inference.yml", {"PostProcess", "character_dict"});
+    auto dict = YamlList(DownloadFile(UrlRecCfg, dir / "PP-OCRv6_medium_rec/inference.yml"), {"PostProcess", "character_dict"});
     m.charset.reserve(dict.size() + 2);
     m.charset.emplace_back();    // CTC blank
     std::ranges::move(dict, std::back_inserter(m.charset));
@@ -956,18 +968,12 @@ static Models LoadModels(Ort::Env& env, fs::path const& dir)
     auto const classes = m.rec.session.GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape().back();
     if (classes > 0 && std::cmp_not_equal(classes, m.charset.size()))
         throw std::runtime_error("recognizer dictionary does not match the model");
-    fs::path const font = dir / "fonts/NotoSansSC.ttf";
-    if (fs::exists(font))
-    {
-        m.font = cv::freetype::createFreeType2();
-        m.font->loadFontData(font.string(), 0);
-    }
-    else
-    {
-        std::cerr << "warning: " << font.string() << " missing, overlays will show boxes only\n";
-    }
+    m.font = cv::freetype::createFreeType2();
+    m.font->loadFontData(DownloadFile(NotoSansSC, dir / "fonts/NotoSansSC.ttf").string(), 0);
+
     return m;
 }
+
 using namespace std::string_view_literals;
 
 struct ScannerImpl : Scanner
