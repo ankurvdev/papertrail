@@ -6,6 +6,7 @@
 //
 // Pre/post-processing follows PaddleOCR 3.x (PaddleX) so results match the official Python pipeline.
 // Usage: ocrtest <image> [<image> ...] <output-dir>
+#include "CommonMacros.h"
 #include "FileDownload.h"
 #include "Scanner.h"
 
@@ -71,6 +72,7 @@ struct Page
 
 struct Model
 {
+    Ort::MemoryInfo          mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     Ort::Session             session{nullptr};
     std::vector<std::string> inputNames;
     std::vector<std::string> outputNames;
@@ -212,11 +214,8 @@ static cv::Mat ToBlob(cv::Mat const& img)
     return blob;
 }
 
-static Ort::Value Tensor(cv::Mat& data, std::vector<int64_t> const& shape)
-{
-    static Ort::MemoryInfo const Mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    return Ort::Value::CreateTensor<float>(Mem, data.ptr<float>(), data.total(), shape.data(), shape.size());
-}
+static Ort::Value Tensor(Ort::MemoryInfo const& mem, cv::Mat& data, std::vector<int64_t> const& shape)
+{ return Ort::Value::CreateTensor<float>(mem, data.ptr<float>(), data.total(), shape.data(), shape.size()); }
 
 static Model LoadModel(Ort::Env& env, fs::path const& path)
 {
@@ -224,7 +223,8 @@ static Model LoadModel(Ort::Env& env, fs::path const& path)
     Ort::SessionOptions opts;
     opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     opts.DisableMemPattern();    // input shapes change on every call
-    Model                            m{.session = Ort::Session(env, path.c_str(), opts), .inputNames = {}, .outputNames = {}};
+    Model m;
+    m.session = Ort::Session(env, path.c_str(), opts);
     Ort::AllocatorWithDefaultOptions alloc;
     for (size_t i = 0; i < m.session.GetInputCount(); ++i) m.inputNames.emplace_back(m.session.GetInputNameAllocated(i, alloc).get());
     for (size_t i = 0; i < m.session.GetOutputCount(); ++i) m.outputNames.emplace_back(m.session.GetOutputNameAllocated(i, alloc).get());
@@ -320,12 +320,13 @@ static std::vector<LayoutBox> DropNested(std::vector<LayoutBox> const& boxes, st
 {
     static constexpr float ContainedRatio = 0.9f;
 
-    static std::set<std::string> const Large = {"chart", "display_formula", "doc_title", "inline_formula", "paragraph_title"};
-    std::vector<LayoutBox>             kept;
+    static constexpr auto Large
+        = std::to_array<std::string_view>({"chart", "display_formula", "doc_title", "inline_formula", "paragraph_title"});
+    std::vector<LayoutBox> kept;
     for (auto const& b : boxes)
     {
         bool const nested = std::ranges::any_of(boxes, [&](LayoutBox const& o) {
-            return &o != &b && Large.contains(labels.at(o.cls)) && b.box.area() > 0
+            return &o != &b && std::ranges::contains(Large, labels.at(o.cls)) && b.box.area() > 0
                    && (b.box & o.box).area() / b.box.area() >= ContainedRatio;
         });
         if (!nested) kept.push_back(b);
@@ -340,7 +341,7 @@ static std::vector<Block> FilterOverlaps(std::vector<LayoutBox> boxes, std::vect
     static constexpr float InlineOverlap = 0.5f;
     static constexpr float MinBlockSide  = 6;
 
-    static std::set<std::string> const Visual = {"image", "table", "seal", "chart"};
+    static constexpr auto Visual = std::to_array<std::string_view>({"image", "table", "seal", "chart"});
     std::erase_if(boxes, [&](LayoutBox const& b) { return labels.at(b.cls) == "reference"; });
     std::vector<bool> drop(boxes.size(), false);
     for (size_t i = 0; i < boxes.size(); ++i)
@@ -361,8 +362,10 @@ static std::vector<Block> FilterOverlaps(std::vector<LayoutBox> boxes, std::vect
                 }
                 continue;
             }
-            bool const mixedVisual = li != lj && (Visual.contains(li) || Visual.contains(lj));
-            bool const tableInside = (li == "table" || lj == "table") && !(Visual.contains(li) && Visual.contains(lj));
+            auto const hasli       = std::ranges::contains(Visual, li);
+            auto const haslj       = std::ranges::contains(Visual, lj);
+            bool const mixedVisual = li != lj && (hasli || haslj);
+            bool const tableInside = (li == "table" || lj == "table") && !(hasli && haslj);
             if (overlap <= OverlapRatio || (mixedVisual && !tableInside)) continue;
             drop.at(boxes.at(i).box.area() >= boxes.at(j).box.area() ? j : i) = true;
         }
@@ -391,9 +394,9 @@ static std::vector<Block> DetectLayout(Models& models, cv::Mat const& img)
     std::vector<Ort::Value> inputs;
     for (auto const& name : models.layout.inputNames)
     {
-        if (name == "image") inputs.push_back(Tensor(blob, {1, 3, LayoutSize, LayoutSize}));
-        else if (name == "im_shape") inputs.push_back(Tensor(imShape, {1, 2}));
-        else inputs.push_back(Tensor(scale, {1, 2}));
+        if (name == "image") inputs.push_back(Tensor(models.layout.mem, blob, {1, 3, LayoutSize, LayoutSize}));
+        else if (name == "im_shape") inputs.push_back(Tensor(models.layout.mem, imShape, {1, 2}));
+        else inputs.push_back(Tensor(models.layout.mem, scale, {1, 2}));
     }
     auto                   out   = Run(models.layout, inputs);
     cv::Mat const          pred  = View(out.front());    // N x 7: class, score, x0, y0, x1, y1, reading order
@@ -533,7 +536,7 @@ static std::vector<Quad> DetectLines(Models& models, cv::Mat const& img)
     cv::divide(x, cv::Scalar(ImageNetStd.at(0), ImageNetStd.at(1), ImageNetStd.at(2)), x);
     cv::Mat                 blob = ToBlob(x);
     std::vector<Ort::Value> inputs;
-    inputs.push_back(Tensor(blob, {1, 3, rh, rw}));
+    inputs.push_back(Tensor(models.det.mem, blob, {1, 3, rh, rw}));
     auto          out  = Run(models.det, inputs);
     cv::Mat const prob = View(out.front());
 
@@ -599,7 +602,7 @@ static std::pair<std::string, float> Recognize(Models& models, cv::Mat const& li
     resized.convertTo(x(cv::Rect(0, 0, resized.cols, RecHeight)), CV_32FC3, Scale, -1.0);
     cv::Mat                 blob = ToBlob(x);
     std::vector<Ort::Value> inputs;
-    inputs.push_back(Tensor(blob, {1, 3, RecHeight, width}));
+    inputs.push_back(Tensor(models.rec.mem, blob, {1, 3, RecHeight, width}));
     auto          out   = Run(models.rec, inputs);
     cv::Mat const probs = View(out.front());    // T x classes (softmax)
 
