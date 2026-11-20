@@ -411,7 +411,7 @@ int PPOCRv5::DetectAndRecognize(cv::Mat const& rgb, std::vector<Object>& objects
 {
     Detect(rgb, objects);
 
-#pragma omp parallel for num_threads(ncnn::get_big_cpu_count()) schedule(dynamic)
+    // #pragma omp parallel for num_threads(ncnn::get_big_cpu_count()) schedule(dynamic)
     for (auto& object : objects) { Recognize(rgb, object); }
 
     return 0;

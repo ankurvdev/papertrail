@@ -5,6 +5,7 @@
 
 #include <clipper2/clipper.h>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <onnxruntime/onnxruntime_cxx_api.h>
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
@@ -20,16 +21,11 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iomanip>
-#include <iostream>
 #include <numeric>
 #include <ranges>
-#include <set>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -769,7 +765,7 @@ static std::vector<Block> GroupOrphans(std::vector<Line> const& lines)
     boxes.reserve(groups.size());
     for (auto const& g : groups) boxes.push_back(g.box);
     std::vector<size_t> all(groups.size());
-    std::iota(all.begin(), all.end(), size_t{0});
+    std::ranges::iota(all, size_t{0});
     std::vector<size_t> order;
     XyCut(all, boxes, order);
     std::vector<Block> sorted;
@@ -981,6 +977,8 @@ static Models LoadModels(Ort::Env& env, fs::path const& dir)
 
 using namespace std::string_view_literals;
 
+namespace
+{
 struct ScannerImpl : Scanner
 {
     ScannerImpl(CommonOptions const& optsIn) :
@@ -1035,6 +1033,7 @@ void ScannerImpl::ScanFile(std::filesystem::path const& fpath, std::filesystem::
     auto endAt = std::chrono::steady_clock::now();
     fmt::print(" done in {}\n", std::chrono::duration_cast<std::chrono::milliseconds>(endAt - startAt));
 }
+}    // namespace
 
 std::unique_ptr<Scanner> Scanner::Create(CommonOptions const& opts)
 { return std::make_unique<ScannerImpl>(opts); }
