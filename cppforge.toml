@@ -67,6 +67,6 @@ publisher-name = "Ankur Verma"
 icon  = "Icon.svg"
 
 [package.musl]
-port  = "41118"
+port  = "5000"
 target  = "papertrail_ort"
-args  = ["--work-dir", "%{WorkDir}%", "scan", "--path", "%{DataDir}%"]
+args  = ["--port", "zzzsPortzzze", "--work-dir", "zzzsWorkDirzzze", "scan", "--path", "zzzsDataDirzzze"]
