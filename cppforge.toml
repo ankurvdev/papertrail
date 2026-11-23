@@ -69,4 +69,4 @@ icon  = "Icon.svg"
 [package.musl]
 port  = "5000"
 target  = "papertrail_ort"
-args  = ["--port", "zzzsPortzzze", "--work-dir", "zzzsWorkDirzzze", "scan", "--path", "zzzsDataDirzzze"]
+args  = ["--web", "zzzsPortzzze", "--work-dir", "zzzsWorkDirzzze", "scan", "--path", "zzzsDataDirzzze"]
