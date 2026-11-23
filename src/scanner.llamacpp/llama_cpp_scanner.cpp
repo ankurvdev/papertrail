@@ -28,12 +28,6 @@ SUPPRESS_WARNINGS_END
 // NOLINTBEGIN
 using namespace std::string_view_literals;
 
-static std::string get_default_local_path(std::string const& url)
-{
-    auto f = string_split<std::string>(url, '#').front();
-    f      = string_split<std::string>(f, '?').front();
-    return (fs_get_cache_file(string_split<std::string>(f, '/').back())).string();
-}
 struct mtmd_cli_context
 {
     common_params                       params = init_common_params();
@@ -75,9 +69,9 @@ struct mtmd_cli_context
 
         params.prompt = "You are an OCR machine. Convert this image to plain text for indexing";
 
-        static constexpr auto mmproj_hf_project = "ggml-org"sv;
-        static constexpr auto mmproj_hf_rep     = "GLM-OCR-GGUF"sv;
-        // static constexpr auto mmproj_hf_file    = "mmproj-F16.gguf"sv;
+        // static constexpr auto mmproj_hf_project = "ggml-org"sv;
+        // static constexpr auto mmproj_hf_rep     = "GLM-OCR-GGUF"sv;
+        //  static constexpr auto mmproj_hf_file    = "mmproj-F16.gguf"sv;
         static constexpr auto model_hf_project = "ggml-org"sv;
         static constexpr auto model_hf_rep     = "GLM-OCR-GGUF"sv;
         // static constexpr auto model_hf_file     = "Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf"sv;

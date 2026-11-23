@@ -1,15 +1,11 @@
-// ocrtest: for each input <file> writes <file>.json (blocks + lines with boxes), <file>.md (reading-order text)
-// and <file>.overlay.jpg (original | red line boxes with the recognised text) into the output directory.
-//
-//   PP-DocLayoutV3   layout blocks + reading order   ONNX Runtime
-//   PP-OCRv6 medium  text line detection + text      ONNX Runtime
-//
-// Pre/post-processing follows PaddleOCR 3.x (PaddleX) so results match the official Python pipeline.
-// Usage: ocrtest <image> [<image> ...] <output-dir>
+
+#include "CommonMacros.h"
+#include "FileDownload.h"
 #include "Scanner.h"
 
 #include <clipper2/clipper.h>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <onnxruntime/onnxruntime_cxx_api.h>
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
@@ -23,14 +19,13 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <numeric>
 #include <ranges>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -44,6 +39,8 @@ using Json   = nlohmann::ordered_json;
 namespace
 {
 
+using Quad = std::array<cv::Point2f, 4>;    // top-left, top-right, bottom-right, bottom-left
+
 struct Line
 {
     Quad        quad{};
@@ -55,11 +52,11 @@ struct Line
 
 struct Block
 {
-    std::string      label;
-    float            score = 0;
-    cv::Rect2f       box;
-    std::vector<int> lines;    // indices into Page::lines, reading order
-    std::string      text;
+    std::string         label;
+    float               score = 0;
+    cv::Rect2f          box;
+    std::vector<size_t> lines;    // indices into Page::lines, reading order
+    std::string         text;
 };
 
 struct Page
@@ -70,6 +67,7 @@ struct Page
 
 struct Model
 {
+    Ort::MemoryInfo          mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     Ort::Session             session{nullptr};
     std::vector<std::string> inputNames;
     std::vector<std::string> outputNames;
@@ -87,7 +85,7 @@ struct Models
 
 struct LayoutBox
 {
-    int        cls   = 0;
+    size_t     cls   = 0;    // index into Models::labels
     float      score = 0;
     cv::Rect2f box;
     float      order = 0;
@@ -211,11 +209,8 @@ static cv::Mat ToBlob(cv::Mat const& img)
     return blob;
 }
 
-static Ort::Value Tensor(cv::Mat& data, std::vector<int64_t> const& shape)
-{
-    static Ort::MemoryInfo const Mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    return Ort::Value::CreateTensor<float>(Mem, data.ptr<float>(), data.total(), shape.data(), shape.size());
-}
+static Ort::Value Tensor(Ort::MemoryInfo const& mem, cv::Mat& data, std::vector<int64_t> const& shape)
+{ return Ort::Value::CreateTensor<float>(mem, data.ptr<float>(), data.total(), shape.data(), shape.size()); }
 
 static Model LoadModel(Ort::Env& env, fs::path const& path)
 {
@@ -223,7 +218,8 @@ static Model LoadModel(Ort::Env& env, fs::path const& path)
     Ort::SessionOptions opts;
     opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     opts.DisableMemPattern();    // input shapes change on every call
-    Model                            m{.session = Ort::Session(env, path.c_str(), opts), .inputNames = {}, .outputNames = {}};
+    Model m;
+    m.session = Ort::Session(env, path.c_str(), opts);
     Ort::AllocatorWithDefaultOptions alloc;
     for (size_t i = 0; i < m.session.GetInputCount(); ++i) m.inputNames.emplace_back(m.session.GetInputNameAllocated(i, alloc).get());
     for (size_t i = 0; i < m.session.GetOutputCount(); ++i) m.outputNames.emplace_back(m.session.GetOutputNameAllocated(i, alloc).get());
@@ -319,12 +315,13 @@ static std::vector<LayoutBox> DropNested(std::vector<LayoutBox> const& boxes, st
 {
     static constexpr float ContainedRatio = 0.9f;
 
-    static std::set<std::string> const Large = {"chart", "display_formula", "doc_title", "inline_formula", "paragraph_title"};
-    std::vector<LayoutBox>             kept;
+    static constexpr auto Large
+        = std::to_array<std::string_view>({"chart", "display_formula", "doc_title", "inline_formula", "paragraph_title"});
+    std::vector<LayoutBox> kept;
     for (auto const& b : boxes)
     {
         bool const nested = std::ranges::any_of(boxes, [&](LayoutBox const& o) {
-            return &o != &b && Large.contains(labels.at(o.cls)) && b.box.area() > 0
+            return &o != &b && std::ranges::contains(Large, labels.at(o.cls)) && b.box.area() > 0
                    && (b.box & o.box).area() / b.box.area() >= ContainedRatio;
         });
         if (!nested) kept.push_back(b);
@@ -339,7 +336,7 @@ static std::vector<Block> FilterOverlaps(std::vector<LayoutBox> boxes, std::vect
     static constexpr float InlineOverlap = 0.5f;
     static constexpr float MinBlockSide  = 6;
 
-    static std::set<std::string> const Visual = {"image", "table", "seal", "chart"};
+    static constexpr auto Visual = std::to_array<std::string_view>({"image", "table", "seal", "chart"});
     std::erase_if(boxes, [&](LayoutBox const& b) { return labels.at(b.cls) == "reference"; });
     std::vector<bool> drop(boxes.size(), false);
     for (size_t i = 0; i < boxes.size(); ++i)
@@ -360,8 +357,10 @@ static std::vector<Block> FilterOverlaps(std::vector<LayoutBox> boxes, std::vect
                 }
                 continue;
             }
-            bool const mixedVisual = li != lj && (Visual.contains(li) || Visual.contains(lj));
-            bool const tableInside = (li == "table" || lj == "table") && !(Visual.contains(li) && Visual.contains(lj));
+            auto const hasli       = std::ranges::contains(Visual, li);
+            auto const haslj       = std::ranges::contains(Visual, lj);
+            bool const mixedVisual = li != lj && (hasli || haslj);
+            bool const tableInside = (li == "table" || lj == "table") && !(hasli && haslj);
             if (overlap <= OverlapRatio || (mixedVisual && !tableInside)) continue;
             drop.at(boxes.at(i).box.area() >= boxes.at(j).box.area() ? j : i) = true;
         }
@@ -390,9 +389,9 @@ static std::vector<Block> DetectLayout(Models& models, cv::Mat const& img)
     std::vector<Ort::Value> inputs;
     for (auto const& name : models.layout.inputNames)
     {
-        if (name == "image") inputs.push_back(Tensor(blob, {1, 3, LayoutSize, LayoutSize}));
-        else if (name == "im_shape") inputs.push_back(Tensor(imShape, {1, 2}));
-        else inputs.push_back(Tensor(scale, {1, 2}));
+        if (name == "image") inputs.push_back(Tensor(models.layout.mem, blob, {1, 3, LayoutSize, LayoutSize}));
+        else if (name == "im_shape") inputs.push_back(Tensor(models.layout.mem, imShape, {1, 2}));
+        else inputs.push_back(Tensor(models.layout.mem, scale, {1, 2}));
     }
     auto                   out   = Run(models.layout, inputs);
     cv::Mat const          pred  = View(out.front());    // N x 7: class, score, x0, y0, x1, y1, reading order
@@ -410,7 +409,7 @@ static std::vector<Block> DetectLayout(Models& models, cv::Mat const& img)
         if (pred.at<float>(i, Score) <= LayoutThresh || cls < 0 || std::cmp_greater_equal(cls, models.labels.size())) continue;
         auto const r = [&](int c) { return std::nearbyint(pred.at<float>(i, c)); };
         boxes.push_back({
-            .cls   = cls,
+            .cls   = static_cast<size_t>(cls),    // >= 0, checked above
             .score = pred.at<float>(i, Score),
             .box   = cv::Rect2f(cv::Point2f(r(X0), r(Y0)), cv::Point2f(r(X1), r(Y1))),
             .order = pred.cols > Order ? pred.at<float>(i, Order) : static_cast<float>(i),
@@ -532,7 +531,7 @@ static std::vector<Quad> DetectLines(Models& models, cv::Mat const& img)
     cv::divide(x, cv::Scalar(ImageNetStd.at(0), ImageNetStd.at(1), ImageNetStd.at(2)), x);
     cv::Mat                 blob = ToBlob(x);
     std::vector<Ort::Value> inputs;
-    inputs.push_back(Tensor(blob, {1, 3, rh, rw}));
+    inputs.push_back(Tensor(models.det.mem, blob, {1, 3, rh, rw}));
     auto          out  = Run(models.det, inputs);
     cv::Mat const prob = View(out.front());
 
@@ -598,7 +597,7 @@ static std::pair<std::string, float> Recognize(Models& models, cv::Mat const& li
     resized.convertTo(x(cv::Rect(0, 0, resized.cols, RecHeight)), CV_32FC3, Scale, -1.0);
     cv::Mat                 blob = ToBlob(x);
     std::vector<Ort::Value> inputs;
-    inputs.push_back(Tensor(blob, {1, 3, RecHeight, width}));
+    inputs.push_back(Tensor(models.rec.mem, blob, {1, 3, RecHeight, width}));
     auto          out   = Run(models.rec, inputs);
     cv::Mat const probs = View(out.front());    // T x classes (softmax)
 
@@ -629,13 +628,13 @@ static float Overlap1D(float a0, float a1, float b0, float b1)
 { return std::min(a1, b1) - std::max(a0, b0); }
 
 // Rows (>= 50% vertical overlap) top to bottom, each left to right.
-static std::vector<std::vector<int>> Rows(std::vector<Line> const& lines, std::vector<int> ids)
+static std::vector<std::vector<size_t>> Rows(std::vector<Line> const& lines, std::vector<size_t> ids)
 {
-    std::ranges::sort(ids, std::less{}, [&](int i) { return lines.at(i).box.y + (lines.at(i).box.height * Half); });
-    std::vector<std::vector<int>> rows;
-    float                         top    = 0;
-    float                         bottom = 0;
-    for (int id : ids)
+    std::ranges::sort(ids, std::less{}, [&](size_t i) { return lines.at(i).box.y + (lines.at(i).box.height * Half); });
+    std::vector<std::vector<size_t>> rows;
+    float                            top    = 0;
+    float                            bottom = 0;
+    for (size_t id : ids)
     {
         cv::Rect2f const& b = lines.at(id).box;
         if (!rows.empty() && Overlap1D(top, bottom, b.y, b.br().y) >= Half * std::min(bottom - top, b.height))
@@ -651,7 +650,7 @@ static std::vector<std::vector<int>> Rows(std::vector<Line> const& lines, std::v
             bottom = b.br().y;
         }
     }
-    for (auto& r : rows) std::ranges::sort(r, std::less{}, [&](int i) { return lines.at(i).box.x; });
+    for (auto& r : rows) std::ranges::sort(r, std::less{}, [&](size_t i) { return lines.at(i).box.x; });
     return rows;
 }
 
@@ -661,15 +660,15 @@ static void BlockText(std::vector<Line> const& lines, Block& b)
     b.text.clear();
     if (b.label == "vertical_text")
     {
-        std::ranges::sort(b.lines, std::greater{}, [&](int i) { return lines.at(i).box.x; });
-        for (int id : b.lines) b.text = JoinText(b.text, lines.at(id).text);
+        std::ranges::sort(b.lines, std::greater{}, [&](size_t i) { return lines.at(i).box.x; });
+        for (size_t id : b.lines) b.text = JoinText(b.text, lines.at(id).text);
         return;
     }
     bool const keepRows = b.label == "table" || b.label == "algorithm";
     for (auto const& row : Rows(lines, std::exchange(b.lines, {})))
     {
         std::string r;
-        for (int id : row)
+        for (size_t id : row)
         {
             b.lines.push_back(id);
             if (keepRows && !r.empty())
@@ -706,7 +705,7 @@ static bool SameParagraph(cv::Rect2f const& a, cv::Rect2f const& b)
 }
 
 // Recursive XY-cut, columns first.
-static void XyCut(std::vector<int> ids, std::vector<cv::Rect2f> const& boxes, std::vector<int>& out)
+static void XyCut(std::vector<size_t> ids, std::vector<cv::Rect2f> const& boxes, std::vector<size_t>& out)
 {
     if (ids.size() <= 1)
     {
@@ -715,8 +714,8 @@ static void XyCut(std::vector<int> ids, std::vector<cv::Rect2f> const& boxes, st
     }
     for (bool const columns : {true, false})
     {
-        auto lo = [&](auto i) { return columns ? boxes.at(i).x : boxes.at(i).y; };
-        auto hi = [&](auto i) { return columns ? boxes.at(i).br().x : boxes.at(i).br().y; };
+        auto lo = [&](size_t i) { return columns ? boxes.at(i).x : boxes.at(i).y; };
+        auto hi = [&](size_t i) { return columns ? boxes.at(i).br().x : boxes.at(i).br().y; };
         std::ranges::sort(ids, std::less{}, lo);
         float reach = hi(ids.front());
         for (size_t k = 1; k < ids.size(); ++k)
@@ -724,25 +723,26 @@ static void XyCut(std::vector<int> ids, std::vector<cv::Rect2f> const& boxes, st
             if (lo(ids.at(k)) > reach)
             {
                 auto const mid = ids.begin() + static_cast<std::ptrdiff_t>(k);
-                XyCut(std::vector<int>(ids.begin(), mid), boxes, out);
-                XyCut(std::vector<int>(mid, ids.end()), boxes, out);
+                XyCut(std::vector<size_t>(ids.begin(), mid), boxes, out);
+                XyCut(std::vector<size_t>(mid, ids.end()), boxes, out);
                 return;
             }
             reach = std::max(reach, hi(ids.at(k)));
         }
     }
-    std::ranges::sort(ids, [&](int a, int b) { return std::pair(boxes.at(a).y, boxes.at(a).x) < std::pair(boxes.at(b).y, boxes.at(b).x); });
+    std::ranges::sort(
+        ids, [&](size_t a, size_t b) { return std::pair(boxes.at(a).y, boxes.at(a).x) < std::pair(boxes.at(b).y, boxes.at(b).x); });
     out.insert(out.end(), ids.begin(), ids.end());
 }
 
 // Lines outside every layout block -> paragraph groups (union-find), ordered by XY-cut.
 static std::vector<Block> GroupOrphans(std::vector<Line> const& lines)
 {
-    std::vector<int> orphans;
+    std::vector<size_t> orphans;
     for (size_t i = 0; i < lines.size(); ++i)
-        if (lines.at(i).block < 0) orphans.push_back(static_cast<int>(i));
+        if (lines.at(i).block < 0) orphans.push_back(i);
     std::vector<size_t> parent(orphans.size());
-    std::iota(parent.begin(), parent.end(), size_t{0});
+    std::ranges::iota(parent, size_t{0});
     std::function<size_t(size_t)> find = [&](size_t x) { return parent.at(x) == x ? x : parent.at(x) = find(parent.at(x)); };
     for (size_t a = 0; a < orphans.size(); ++a)
         for (size_t b = a + 1; b < orphans.size(); ++b)
@@ -764,13 +764,13 @@ static std::vector<Block> GroupOrphans(std::vector<Line> const& lines)
     std::vector<cv::Rect2f> boxes;
     boxes.reserve(groups.size());
     for (auto const& g : groups) boxes.push_back(g.box);
-    std::vector<int> all(groups.size());
-    std::iota(all.begin(), all.end(), 0);
-    std::vector<int> order;
+    std::vector<size_t> all(groups.size());
+    std::ranges::iota(all, size_t{0});
+    std::vector<size_t> order;
     XyCut(all, boxes, order);
     std::vector<Block> sorted;
     sorted.reserve(order.size());
-    for (int i : order) sorted.push_back(std::move(groups.at(static_cast<size_t>(i))));
+    for (size_t i : order) sorted.push_back(std::move(groups.at(i)));
     return sorted;
 }
 
@@ -798,7 +798,7 @@ static void Assemble(Page& page)
             }
         }
         if (best < LineInBlock) line.block = -1;
-        if (line.block >= 0) page.blocks.at(static_cast<size_t>(line.block)).lines.push_back(static_cast<int>(i));
+        if (line.block >= 0) page.blocks.at(static_cast<size_t>(line.block)).lines.push_back(i);
     }
     // leftover lines: insert each paragraph before the first block that starts below it in the same column
     for (auto& g : GroupOrphans(page.lines))
@@ -812,11 +812,11 @@ static void Assemble(Page& page)
     for (size_t b = 0; b < page.blocks.size(); ++b)
     {
         BlockText(page.lines, page.blocks.at(b));
-        for (int& id : page.blocks.at(b).lines)
+        for (size_t& id : page.blocks.at(b).lines)
         {
-            ordered.push_back(page.lines.at(static_cast<size_t>(id)));
+            ordered.push_back(page.lines.at(id));
             ordered.back().block = static_cast<int>(b);
-            id                   = static_cast<int>(ordered.size() - 1);
+            id                   = ordered.size() - 1;
         }
     }
     page.lines = std::move(ordered);
@@ -869,32 +869,34 @@ static Json ToJson(Page const& page, std::string const& path, cv::Size size)
 // Writes `text` into the quad, scaled to its height and stretched (<= 2x) or shrunk to its width.
 static void DrawText(cv::Mat& img, Quad const& q, std::string const& text, cv::freetype::FreeType2& font, cv::Scalar const& color)
 {
-    static constexpr float  FontScale  = 0.8f;    // font size relative to the box height
+    static constexpr double FontScale  = 0.8;    // font size relative to the box height
     static constexpr double MaxStretch = 2.0;
-    static constexpr float  PadW       = 0.01f;
-    static constexpr float  PadH       = 0.03f;
+    static constexpr double PadW       = 0.01;
+    static constexpr double PadH       = 0.03;
     Quad                    dst        = q;    // text corners tl, tr, br, bl -> image points
-    auto                    w          = static_cast<float>(std::max(cv::norm(q.at(0) - q.at(1)), cv::norm(q.at(3) - q.at(2))));
-    auto                    h          = static_cast<float>(std::max(cv::norm(q.at(0) - q.at(3)), cv::norm(q.at(1) - q.at(2))));
+    double                  w          = std::max(cv::norm(q.at(0) - q.at(1)), cv::norm(q.at(3) - q.at(2)));
+    double                  h          = std::max(cv::norm(q.at(0) - q.at(3)), cv::norm(q.at(1) - q.at(2)));
     if (h >= TallRatio * w)
     {    // vertical line: the recognizer read it rotated 90 degrees counter-clockwise
         dst = {q.at(1), q.at(2), q.at(3), q.at(0)};
         std::swap(w, h);
     }
-    int const   fontPx = static_cast<int>(FontScale * h);
-    float const pad    = (PadW * w) + (PadH * h);
-    float const avail  = w - (2 * pad);
+    int const    fontPx = static_cast<int>(FontScale * h);
+    double const pad    = (PadW * w) + (PadH * h);
+    double const avail  = w - (2 * pad);
     if (text.empty() || fontPx < 3 || avail < 2) return;
     int            baseline = 0;
     cv::Size const size     = font.getTextSize(text, fontPx, -1, &baseline);
     cv::Mat        canvas(size.height + baseline + 2, size.width + 2, CV_8UC1, cv::Scalar(0));
     font.putText(canvas, text, {1, size.height}, fontPx, cv::Scalar(MaxPixel), -1, cv::LINE_AA, true);    // org = baseline
     // canvas -> text rectangle (scale, offset) -> quad (homography) -> region of interest
-    double const                     fit = avail / static_cast<double>(canvas.cols);
+    double const                     fit = avail / canvas.cols;
     double const                     sx  = std::min(fit, MaxStretch);
     double const                     sy  = std::min(fit, 1.0);
-    cv::Matx33d const                toRect(sx, 0, pad, 0, sy, (h - (sy * canvas.rows)) * Half, 0, 0, 1);
-    std::array<cv::Point2f, 4> const rect = {cv::Point2f(0, 0), cv::Point2f(w, 0), cv::Point2f(w, h), cv::Point2f(0, h)};
+    cv::Matx33d const                toRect(sx, 0, pad, 0, sy, (h - (sy * canvas.rows)) / 2, 0, 0, 1);
+    auto const                       wf   = static_cast<float>(w);
+    auto const                       hf   = static_cast<float>(h);
+    std::array<cv::Point2f, 4> const rect = {cv::Point2f(0, 0), cv::Point2f(wf, 0), cv::Point2f(wf, hf), cv::Point2f(0, hf)};
     cv::Matx33d const                toQuad(cv::getPerspectiveTransform(rect.data(), dst.data()));
     cv::Rect const roi = cv::boundingRect(std::vector<cv::Point2f>(q.begin(), q.end())) & cv::Rect(0, 0, img.cols, img.rows);
     if (roi.empty()) return;
@@ -940,15 +942,26 @@ static cv::Mat DrawOverlay(cv::Mat const& img, Page const& page, cv::Ptr<cv::fre
 // ---------------------------------------------------------------------------------------------
 static Models LoadModels(Ort::Env& env, fs::path const& dir)
 {
+#define HFBASEURL(x) (std::string_view("https://huggingface.co/PaddlePaddle/" x))    // NOLINT
+
+    static constexpr auto UrlLayout = HFBASEURL("PP-DocLayoutV3_onnx/resolve/46bbdf188bb0a772c08aed74882ce7e51a8f1ea6/inference.onnx");
+    static constexpr auto UrlDet    = HFBASEURL("PP-OCRv6_medium_det_onnx/resolve/61323801669c338b7891481ec7bac61ce31b576a/inference.onnx");
+    static constexpr auto UrlRec    = HFBASEURL("PP-OCRv6_medium_rec_onnx/resolve/50c7eacafc52fa7bcf4194e8cd08e46f8558504b/inference.onnx");
+    static constexpr auto UrlLayoutCfg = HFBASEURL("PP-DocLayoutV3_onnx/resolve/46bbdf188bb0a772c08aed74882ce7e51a8f1ea6/inference.yml");
+    static constexpr auto UrlRecCfg = HFBASEURL("PP-OCRv6_medium_rec_onnx/resolve/50c7eacafc52fa7bcf4194e8cd08e46f8558504b/inference.yml");
+    static constexpr std::string_view NotoSansSC
+        = "https://raw.githubusercontent.com/google/fonts/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf";
+
+    std::filesystem::create_directories(dir / "fonts");
     Models m{
-        .layout  = LoadModel(env, dir / "PP-DocLayoutV3/inference.onnx"),
-        .det     = LoadModel(env, dir / "PP-OCRv6_medium_det/inference.onnx"),
-        .rec     = LoadModel(env, dir / "PP-OCRv6_medium_rec/inference.onnx"),
-        .labels  = YamlList(dir / "PP-DocLayoutV3/inference.yml", {"label_list"}),
+        .layout  = LoadModel(env, DownloadFile(UrlLayout, dir / "PP-DocLayoutV3/inference.onnx")),
+        .det     = LoadModel(env, DownloadFile(UrlDet, dir / "PP-OCRv6_medium_det/inference.onnx")),
+        .rec     = LoadModel(env, DownloadFile(UrlRec, dir / "PP-OCRv6_medium_rec/inference.onnx")),
+        .labels  = YamlList(DownloadFile(UrlLayoutCfg, dir / "PP-DocLayoutV3/inference.yml"), {"label_list"}),
         .charset = {},
         .font    = {},
     };
-    auto dict = YamlList(dir / "PP-OCRv6_medium_rec/inference.yml", {"PostProcess", "character_dict"});
+    auto dict = YamlList(DownloadFile(UrlRecCfg, dir / "PP-OCRv6_medium_rec/inference.yml"), {"PostProcess", "character_dict"});
     m.charset.reserve(dict.size() + 2);
     m.charset.emplace_back();    // CTC blank
     std::ranges::move(dict, std::back_inserter(m.charset));
@@ -956,20 +969,16 @@ static Models LoadModels(Ort::Env& env, fs::path const& dir)
     auto const classes = m.rec.session.GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape().back();
     if (classes > 0 && std::cmp_not_equal(classes, m.charset.size()))
         throw std::runtime_error("recognizer dictionary does not match the model");
-    fs::path const font = dir / "fonts/NotoSansSC.ttf";
-    if (fs::exists(font))
-    {
-        m.font = cv::freetype::createFreeType2();
-        m.font->loadFontData(font.string(), 0);
-    }
-    else
-    {
-        std::cerr << "warning: " << font.string() << " missing, overlays will show boxes only\n";
-    }
+    m.font = cv::freetype::createFreeType2();
+    m.font->loadFontData(DownloadFile(NotoSansSC, dir / "fonts/NotoSansSC.ttf").string(), 0);
+
     return m;
 }
+
 using namespace std::string_view_literals;
 
+namespace
+{
 struct ScannerImpl : Scanner
 {
     ScannerImpl(CommonOptions const& optsIn) :
@@ -1024,6 +1033,7 @@ void ScannerImpl::ScanFile(std::filesystem::path const& fpath, std::filesystem::
     auto endAt = std::chrono::steady_clock::now();
     fmt::print(" done in {}\n", std::chrono::duration_cast<std::chrono::milliseconds>(endAt - startAt));
 }
+}    // namespace
 
 std::unique_ptr<Scanner> Scanner::Create(CommonOptions const& opts)
 { return std::make_unique<ScannerImpl>(opts); }
