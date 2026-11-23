@@ -1,0 +1,72 @@
+[build.web]
+dir = "web"
+type = "npmresource"
+
+[build.cli]
+dir = "src/cli"
+type = "lib"
+packages = ["xapian","openssl"]
+links = "web"
+
+[build.scanner_ort]
+dir = "src/scanner.ort"
+type = "lib"
+includes = "include"
+links = "cli"
+packages = ["onnxruntime","opencv4","clipper2","yaml-cpp","curlpp"]
+
+[build.papertrail_ort]
+type = "exe"
+links = ["scanner_ort","web"]
+
+[build.papertrail_llamacpp]
+type  = "exe"
+links  = ["scanner_llamacpp","web"]
+
+[build.scanner_llamacpp]
+disabled = true
+dir  = "src/scanner.llamacpp"
+type  = "lib"
+links  = "cli"
+packages  = ["curl","llama-cpp"]
+
+[build.papertrail_ncnn]
+type  = "exe"
+links  = ["cli","scanner_ncnn","web"]
+
+[build.scanner_ncnn]
+disabled = true
+dir  = "src/scanner.ncnn"
+type  = "lib"
+links  = "cli"
+packages  = ["ncnn","opencv4"]
+
+[build.scanner_libtorch]
+disabled = true
+dir  = "src/scanner.libtorch"
+resources  = "config"
+src = ["src/cli/Scanner.h"]
+type  = "lib"
+packages  = ["opencv4","libtorch"]
+links  = "cli"
+
+[build.papertrail_libtorch]
+type  = "exe"
+links  = ["scanner_libtorch","web"]
+
+[package]
+# Version string is major.minor.date.0
+version = "0.1"
+name = "Papertrail"
+id  = "papertrail"
+title  = "PaperTrail document management and search"
+long-description  = "description.txt"
+publisher-name = "Ankur Verma"
+
+[package.images]
+icon  = "Icon.svg"
+
+[package.musl]
+port  = "41118"
+target  = "papertrail_ort"
+args  = ["--work-dir", "%{WorkDir}%", "scan", "--path", "%{DataDir}%"]
