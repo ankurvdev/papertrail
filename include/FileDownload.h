@@ -82,7 +82,10 @@ inline void CheckResponseCode(long responseCode)
 inline std::filesystem::path DownloadFile(std::string const& urlstr, std::filesystem::path const& fpathIn)
 {
     auto fpath = fpathIn;
-    if (fpath.empty() || (std::filesystem::exists(fpath) && std::filesystem::is_directory(fpath)))
+    auto exists = std::filesystem::exists(fpath);
+    auto isDir = std::filesystem::is_directory(fpath);
+    if (exists && !isDir) { return fpath; }
+    if (fpath.empty() || (exists && isDir))
     {
         auto urlp = boost::urls::parse_uri(urlstr);
         if (!urlp) { throw std::runtime_error(fmt::format("boost::urls::parse_uri error : {}", urlp.error().to_string())); }
